@@ -82,12 +82,20 @@ function SchemaContent() {
   const previewCache = useRef(new Map());
 
   useEffect(() => {
+    // StrictMode 在開發模式下會把這個 effect 掛載→清除→再掛載一次；沒有這個
+    // cancelled guard 的話，第一次掛載那個沒被中止的 fetch 晚點回來時，
+    // 會用預設表名覆蓋掉使用者當下已經手動選好的表。
+    let cancelled = false;
     getSchemaOverview().then(({ tables: allTables }) => {
+      if (cancelled) return;
       setTables(allTables);
       const sortedNames = Object.keys(allTables).sort();
       setSelectedTable(sortedNames[0] ?? "");
       setIsLoading(false);
     });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

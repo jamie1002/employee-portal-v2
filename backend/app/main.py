@@ -15,6 +15,7 @@ from app.routers import (
     attendance,
     auth,
     departments,
+    export,
     health,
     holidays,
     leave_quota,
@@ -64,3 +65,4 @@ app.include_router(departments.router, prefix="/api")
 app.include_router(holidays.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(admin_schema.router, prefix="/api")
+app.include_router(export.router, prefix="/api")

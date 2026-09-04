@@ -97,3 +97,42 @@ async def cancel_by_id(pool: asyncpg.Pool, booking_id: int) -> asyncpg.Record | 
 
 async def delete_by_id(pool: asyncpg.Pool, booking_id: int) -> str | None:
     return await pool.fetchval("DELETE FROM room_bookings WHERE id = $1 RETURNING 'ok'", booking_id)
+
+
+async def find_all_in_range(
+    pool: asyncpg.Pool,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    room_id: int | None = None,
+    department_id: int | None = None,
+) -> list[asyncpg.Record]:
+    """供匯出報表使用。`department_id` 篩的是**借用人**所屬部門，不是場地本身
+    （場地不分部門）——SPEC.md §4.8 的部門範圍限縮，指的就是這一欄。"""
+    conditions = ["1 = 1"]
+    params: list = []
+    if start_date is not None:
+        params.append(pg_date(start_date))
+        conditions.append(f"(rb.start_time AT TIME ZONE 'Asia/Taipei')::date >= ${len(params)}")
+    if end_date is not None:
+        params.append(pg_date(end_date))
+        conditions.append(f"(rb.start_time AT TIME ZONE 'Asia/Taipei')::date <= ${len(params)}")
+    if room_id is not None:
+        params.append(room_id)
+        conditions.append(f"rb.room_id = ${len(params)}")
+    if department_id is not None:
+        params.append(department_id)
+        conditions.append(f"u.department_id = ${len(params)}")
+
+    return await pool.fetch(
+        f"""
+        SELECT rb.id, rb.room_id, r.name AS room_name, rb.user_id, u.name AS booked_by_name,
+               d.name AS department_name, rb.title, rb.start_time, rb.end_time, rb.status, rb.created_at
+        FROM room_bookings rb
+        JOIN rooms r ON r.id = rb.room_id
+        JOIN users u ON u.id = rb.user_id
+        LEFT JOIN departments d ON d.id = u.department_id
+        WHERE {" AND ".join(conditions)}
+        ORDER BY rb.start_time DESC
+        """,
+        *params,
+    )

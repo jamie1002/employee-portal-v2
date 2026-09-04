@@ -8,6 +8,7 @@ import LeaveBalancePage from "./pages/LeaveBalancePage";
 import LoginPage from "./pages/LoginPage";
 import DepartmentPage from "./pages/admin/DepartmentPage";
 import EmployeePage from "./pages/admin/EmployeePage";
+import ExportPage from "./pages/admin/ExportPage";
 import HolidayManagementPage from "./pages/admin/HolidayManagementPage";
 import SchemaPage from "./pages/admin/SchemaPage";
 import SettingsPage from "./pages/admin/SettingsPage";
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/holidays" element={<HolidayManagementPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/schema" element={<SchemaPage />} />
+          <Route path="/exports" element={<ExportPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

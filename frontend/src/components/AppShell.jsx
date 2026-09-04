@@ -23,6 +23,7 @@ export const NAV_ITEMS = [
   { to: "/holidays", label: "國定假日", roles: ["admin"], permissions: ["holidays.manage"] },
   { to: "/settings", label: "考勤設定", roles: ["admin"], permissions: ["settings.manage"] },
   { to: "/schema", label: "資料庫管理", roles: ["admin"] },
+  { to: "/exports", label: "匯出報表", roles: ["admin", "manager"], permissions: ["exports.run"] },
 ];
 
 export default function AppShell() {
