@@ -26,22 +26,26 @@ from app.config.tables import BUSINESS_TABLES  # noqa: E402
 SEED_DIR = Path(__file__).resolve().parents[3] / "db" / "seed"
 
 
+async def apply_seed(conn) -> dict[str, int]:
+    """在既有連線上把業務資料還原成種子狀態，回傳各表筆數。
+
+    CLI（`npm run db:seed`）、展示資料重置 API 與測試的每測試重置 fixture 共用
+    這一份定義——「種子狀態」只能有一個說法，否則測試綠燈不代表展示環境正確。
+    """
+    await conn.execute(f"TRUNCATE {', '.join(BUSINESS_TABLES)} RESTART IDENTITY CASCADE")
+
+    for sql_file in sorted(SEED_DIR.glob("*.sql")):
+        await conn.execute(sql_file.read_text(encoding="utf-8"))
+
+    return {table: await conn.fetchval(f"SELECT count(*) FROM {table}") for table in BUSINESS_TABLES}
+
+
 async def run_seed(dsn: str | None = None) -> None:
     target_dsn = dsn or app_settings.DATABASE_URL
     base_dsn, needs_ssl = prepare_dsn(target_dsn)
     conn = await asyncpg.connect(dsn=base_dsn, ssl=True if needs_ssl else None)
     try:
-        tables_csv = ", ".join(BUSINESS_TABLES)
-        await conn.execute(f"TRUNCATE {tables_csv} RESTART IDENTITY CASCADE")
-
-        for sql_file in sorted(SEED_DIR.glob("*.sql")):
-            print(f"載入種子資料：{sql_file.name}")
-            sql = sql_file.read_text(encoding="utf-8")
-            await conn.execute(sql)
-
-        counts = {}
-        for table in BUSINESS_TABLES:
-            counts[table] = await conn.fetchval(f"SELECT count(*) FROM {table}")
+        counts = await apply_seed(conn)
         print("種子資料筆數：", counts)
     finally:
         await conn.close()

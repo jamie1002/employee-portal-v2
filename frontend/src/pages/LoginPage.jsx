@@ -32,7 +32,7 @@ export default function LoginPage() {
 
     try {
       await login(loginEmail, loginPassword);
-      navigate("/", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err.response?.data?.error?.message ?? "登入失敗，請稍後再試。");
     } finally {

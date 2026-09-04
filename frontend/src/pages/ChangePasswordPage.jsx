@@ -24,7 +24,7 @@ export default function ChangePasswordPage() {
     setIsSubmitting(true);
     try {
       await changePassword(oldPassword, newPassword);
-      navigate("/", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err.response?.data?.error?.message ?? "修改密碼失敗，請稍後再試。");
     } finally {

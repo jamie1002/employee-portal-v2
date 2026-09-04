@@ -7,15 +7,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.database import close_pool, init_pool
 from app.config.settings import app_settings
+from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.security_headers import SecurityHeadersMiddleware
-from app.routers import auth, health, users
+from app.routers import attendance, auth, health, users
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool(app_settings.DATABASE_URL)
+    start_scheduler()
     yield
+    await stop_scheduler()
     await close_pool()
 
 
@@ -35,3 +38,4 @@ register_error_handlers(app)
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(attendance.router, prefix="/api")

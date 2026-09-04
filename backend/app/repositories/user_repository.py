@@ -42,6 +42,52 @@ async def find_by_id_with_permissions(pool: asyncpg.Pool, user_id: int) -> async
     )
 
 
+_PUBLIC_COLUMNS = """
+    u.id, u.name, u.email, u.role, u.department_id, u.employee_no,
+    u.extension_number, u.hire_date, d.name AS department_name
+"""
+
+
+async def find_by_ids(pool: asyncpg.Pool, user_ids: list[int]) -> list[asyncpg.Record]:
+    """出勤查詢會一次解析多位使用者，需要姓名／員工編號／部門名稱等中繼資料。"""
+    if not user_ids:
+        return []
+    return await pool.fetch(
+        f"""
+        SELECT {_PUBLIC_COLUMNS}
+        FROM users u
+        LEFT JOIN departments d ON d.id = u.department_id
+        WHERE u.id = ANY($1::int[])
+        """,
+        user_ids,
+    )
+
+
+async def find_all(pool: asyncpg.Pool, department_id: int | None = None) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        f"""
+        SELECT {_PUBLIC_COLUMNS}
+        FROM users u
+        LEFT JOIN departments d ON d.id = u.department_id
+        WHERE ($1::int IS NULL OR u.department_id = $1)
+        ORDER BY u.employee_no NULLS LAST, u.id
+        """,
+        department_id,
+    )
+
+
+async def find_public_by_id(pool: asyncpg.Pool, user_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        f"""
+        SELECT {_PUBLIC_COLUMNS}
+        FROM users u
+        LEFT JOIN departments d ON d.id = u.department_id
+        WHERE u.id = $1
+        """,
+        user_id,
+    )
+
+
 async def find_credentials_by_id(pool: asyncpg.Pool, user_id: int) -> asyncpg.Record | None:
     return await pool.fetchrow("SELECT id, email, password_hash FROM users WHERE id = $1", user_id)
 
