@@ -26,7 +26,9 @@ test("送出請假申請後出現在我的申請清單", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/requests$/);
   await page.getByRole("button", { name: "請假" }).click();
-  await expect(page.getByText("事假")).toBeVisible();
+  // 桌機／手機雙結構同時渲染（見 docs/UI-SPEC.md §2.4），role="cell" 只對應
+  // 桌機表格版，可正確排除隱藏的卡片版。
+  await expect(page.getByRole("cell", { name: "事假" })).toBeVisible();
   await expect(page.getByRole("button", { name: /^待審/ })).toBeVisible();
 });
 

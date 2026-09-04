@@ -19,9 +19,9 @@ const ROLE_LABEL = { admin: "系統管理者", manager: "部門主管", employee
 const inputClass =
   "rounded-lg border border-border-subtle bg-surface-900 px-2 py-1 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
 
-function DepartmentSelect({ value, onChange, departmentOptions, id }) {
+function DepartmentSelect({ value, onChange, departmentOptions, id, className = "" }) {
   return (
-    <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={inputClass}>
+    <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={`${inputClass} ${className}`}>
       <option value="">無</option>
       {departmentOptions.map((department) => (
         <option key={department.id} value={department.id}>
@@ -71,29 +71,35 @@ function CreateUserForm({ departmentOptions, onCreated }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="glass-panel flex flex-wrap items-end gap-3 rounded-xl p-4">
+    <form onSubmit={handleSubmit} className="glass-panel flex flex-col items-stretch gap-3 rounded-xl p-4 sm:flex-row sm:flex-wrap sm:items-end">
       {error && <p className="w-full text-sm text-status-danger">{error}</p>}
 
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="new-user-name" className="mb-1 block text-xs text-text-muted">
           姓名
         </label>
-        <input id="new-user-name" required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+        <input
+          id="new-user-name" required value={name} onChange={(e) => setName(e.target.value)}
+          className={`w-full sm:w-auto ${inputClass}`}
+        />
       </div>
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="new-user-email" className="mb-1 block text-xs text-text-muted">
           電子郵件
         </label>
         <input
           id="new-user-email" type="email" required value={email}
-          onChange={(e) => setEmail(e.target.value)} className={inputClass}
+          onChange={(e) => setEmail(e.target.value)} className={`w-full sm:w-auto ${inputClass}`}
         />
       </div>
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="new-user-role" className="mb-1 block text-xs text-text-muted">
           職位
         </label>
-        <select id="new-user-role" value={role} onChange={(e) => setRole(e.target.value)} className={inputClass}>
+        <select
+          id="new-user-role" value={role} onChange={(e) => setRole(e.target.value)}
+          className={`w-full sm:w-auto ${inputClass}`}
+        >
           {SELECTABLE_ROLES.map((r) => (
             <option key={r} value={r}>
               {ROLE_LABEL[r]}
@@ -101,26 +107,27 @@ function CreateUserForm({ departmentOptions, onCreated }) {
           ))}
         </select>
       </div>
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="new-user-department" className="mb-1 block text-xs text-text-muted">
           部門
         </label>
         <DepartmentSelect
           id="new-user-department" value={departmentId} onChange={setDepartmentId} departmentOptions={departmentOptions}
+          className="w-full sm:w-auto"
         />
       </div>
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="new-user-password" className="mb-1 block text-xs text-text-muted">
           密碼
         </label>
         <input
           id="new-user-password" type="password" required value={password}
-          onChange={(e) => setPassword(e.target.value)} className={inputClass}
+          onChange={(e) => setPassword(e.target.value)} className={`w-full sm:w-auto ${inputClass}`}
         />
       </div>
       <button
         type="submit" disabled={isSubmitting}
-        className="rounded-lg bg-accent-500 px-4 py-2 text-sm font-medium text-surface-950 hover:bg-accent-600 disabled:opacity-50"
+        className="min-h-11 rounded-lg bg-accent-500 px-4 py-2 text-sm font-medium text-surface-950 hover:bg-accent-600 disabled:opacity-50"
       >
         {isSubmitting ? "建立中…" : "建立員工"}
       </button>
@@ -331,6 +338,251 @@ function EmployeeRow({ user, isAdmin, departmentOptions, permissions, onSaved, o
   );
 }
 
+// 卡片版與 EmployeeRow 平行存在、各自管理自己的本地 state（isEditing、草稿欄位等）
+// ——同一時間只有一個透過 CSS 可見，切換斷點時未儲存的編輯草稿本來就無需跨版面保留
+// （見 docs/UI-SPEC.md §2.4）。已儲存的資料仍是同一份 lifted state，兩邊會一致更新。
+function EmployeeCard({ user, isAdmin, departmentOptions, permissions, onSaved, onDeleted }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
+  const [role, setRole] = useState(user.role);
+  const [departmentId, setDepartmentId] = useState(user.department_id ?? "");
+  const [extensionNumber, setExtensionNumber] = useState(user.extension_number ?? "");
+  const [hireDate, setHireDate] = useState(user.hire_date ?? "");
+  const [pendingPermissions, setPendingPermissions] = useState(permissions.map((p) => p.permission));
+  const [showPermissionPanel, setShowPermissionPanel] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function startEdit() {
+    setName(user.name);
+    setEmail(user.email);
+    setRole(user.role);
+    setDepartmentId(user.department_id ?? "");
+    setExtensionNumber(user.extension_number ?? "");
+    setHireDate(user.hire_date ?? "");
+    setPendingPermissions(permissions.map((p) => p.permission));
+    setError("");
+    setIsEditing(true);
+  }
+
+  async function handleSave() {
+    setIsSubmitting(true);
+    setError("");
+    try {
+      const { user: updatedUser } = await updateUser(user.id, {
+        name,
+        email,
+        role,
+        department_id: departmentId ? Number(departmentId) : null,
+        extension_number: extensionNumber,
+        hire_date: hireDate,
+      });
+
+      const originalKeys = permissions.map((p) => p.permission).sort().join(",");
+      const nextKeys = [...pendingPermissions].sort().join(",");
+      let updatedPermissions = null;
+      if (isAdmin && originalKeys !== nextKeys) {
+        const { permissions: rows } = await setUserPermissions(user.id, pendingPermissions);
+        updatedPermissions = rows;
+      }
+
+      onSaved(updatedUser, updatedPermissions);
+      setIsEditing(false);
+    } catch (err) {
+      setError(err.response?.data?.error?.message ?? "更新失敗，請稍後再試。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleDelete() {
+    setIsSubmitting(true);
+    setError("");
+    try {
+      await deleteUser(user.id);
+      onDeleted(user.id);
+    } catch (err) {
+      setError(err.response?.data?.error?.message ?? "刪除失敗，請稍後再試。");
+      setIsSubmitting(false);
+    }
+  }
+
+  const canManage = isAdmin && user.role !== "admin";
+  // 卡片版是新建的觸控介面，操作按鈕統一給 44px 觸控高度（min-h-11）；
+  // 桌機表格沿用既有的 text-xs 小按鈕不動（批 8 的核心限制是桌機版不得改變）。
+  const cardButtonClass = "inline-flex min-h-11 items-center rounded-lg px-3 text-xs";
+
+  if (isEditing) {
+    return (
+      <div className="glass-panel space-y-3 rounded-xl p-4">
+        {error && <p className="text-xs text-status-danger">{error}</p>}
+        <p className="text-xs text-text-muted">員工編號：{user.employee_no}</p>
+        <div>
+          <label htmlFor={`card-name-${user.id}`} className="mb-1 block text-xs text-text-muted">
+            姓名
+          </label>
+          <input
+            id={`card-name-${user.id}`} value={name} onChange={(e) => setName(e.target.value)}
+            className={`w-full ${inputClass}`}
+          />
+        </div>
+        <div>
+          <label htmlFor={`card-email-${user.id}`} className="mb-1 block text-xs text-text-muted">
+            電子郵件
+          </label>
+          <input
+            id={`card-email-${user.id}`} value={email} onChange={(e) => setEmail(e.target.value)}
+            className={`w-full ${inputClass}`}
+          />
+        </div>
+        <div>
+          <label htmlFor={`card-role-${user.id}`} className="mb-1 block text-xs text-text-muted">
+            職位
+          </label>
+          <select
+            id={`card-role-${user.id}`} value={role} onChange={(e) => setRole(e.target.value)}
+            className={`w-full ${inputClass}`}
+          >
+            {SELECTABLE_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {ROLE_LABEL[r]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor={`card-department-${user.id}`} className="mb-1 block text-xs text-text-muted">
+            部門
+          </label>
+          <DepartmentSelect
+            id={`card-department-${user.id}`} value={departmentId} onChange={setDepartmentId}
+            departmentOptions={departmentOptions} className="w-full"
+          />
+        </div>
+        <div>
+          <label htmlFor={`card-extension-${user.id}`} className="mb-1 block text-xs text-text-muted">
+            分機
+          </label>
+          <input
+            id={`card-extension-${user.id}`} value={extensionNumber} onChange={(e) => setExtensionNumber(e.target.value)}
+            className={`w-full ${inputClass}`}
+          />
+        </div>
+        <div>
+          <label htmlFor={`card-hire-date-${user.id}`} className="mb-1 block text-xs text-text-muted">
+            到職日
+          </label>
+          <input
+            id={`card-hire-date-${user.id}`} type="date" value={hireDate} onChange={(e) => setHireDate(e.target.value)}
+            className={`w-full ${inputClass}`}
+          />
+        </div>
+        {isAdmin && (
+          <div>
+            <p className="mb-1 text-xs text-text-muted">額外權限</p>
+            <PermissionCell permissions={permissions} isEditing onEdit={() => setShowPermissionPanel(true)} />
+          </div>
+        )}
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button" disabled={isSubmitting} onClick={handleSave}
+            className={`${cardButtonClass} bg-accent-500 font-medium text-surface-950 disabled:opacity-50`}
+          >
+            儲存
+          </button>
+          <button
+            type="button" onClick={() => setIsEditing(false)}
+            className={`${cardButtonClass} border border-border-subtle text-text-secondary`}
+          >
+            取消
+          </button>
+        </div>
+        {showPermissionPanel && (
+          <PermissionPanel
+            selected={pendingPermissions}
+            onChange={setPendingPermissions}
+            onClose={() => setShowPermissionPanel(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="glass-panel space-y-3 rounded-xl p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-base font-medium text-text-primary">{user.name}</p>
+          <p className="text-xs text-text-muted">{user.employee_no}</p>
+        </div>
+        <span className="rounded-full border border-accent-500 px-2 py-0.5 text-xs text-accent-400">
+          {ROLE_LABEL[user.role]}
+        </span>
+      </div>
+
+      <dl className="grid grid-cols-2 gap-2 text-sm">
+        <div className="col-span-2">
+          <dt className="text-text-muted">電子郵件</dt>
+          <dd className="break-all text-text-secondary">{user.email}</dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">部門</dt>
+          <dd className="text-text-secondary">{user.department_name ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">分機</dt>
+          <dd className="text-text-secondary">{user.extension_number ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">到職日</dt>
+          <dd className="text-text-secondary">{user.hire_date}</dd>
+        </div>
+      </dl>
+
+      {isAdmin && (
+        <div>
+          <p className="text-xs text-text-muted">額外權限</p>
+          <PermissionCell permissions={permissions} isEditing={false} onEdit={() => {}} />
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="border-t border-border-subtle pt-2">
+          {!canManage ? (
+            <p className="text-xs text-text-muted">系統管理者帳號不提供編輯入口</p>
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={startEdit} className={`${cardButtonClass} border border-border-subtle text-accent-400`}>
+                編輯
+              </button>
+              {confirmingDelete ? (
+                <>
+                  <button
+                    type="button" disabled={isSubmitting} onClick={handleDelete}
+                    className={`${cardButtonClass} border border-status-danger text-status-danger disabled:opacity-50`}
+                  >
+                    確定刪除？
+                  </button>
+                  <button type="button" onClick={() => setConfirmingDelete(false)} className={`${cardButtonClass} border border-border-subtle text-text-secondary`}>
+                    取消
+                  </button>
+                </>
+              ) : (
+                <button type="button" onClick={() => setConfirmingDelete(true)} className={`${cardButtonClass} border border-status-danger text-status-danger`}>
+                  刪除
+                </button>
+              )}
+              {error && <p className="mt-2 text-xs text-status-danger">{error}</p>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function groupPermissionsByUser(rows) {
   const grouped = {};
   for (const row of rows) {
@@ -426,7 +678,21 @@ export default function EmployeePage() {
 
       {isAdmin && <CreateUserForm departmentOptions={departmentOptions} onCreated={handleCreated} />}
 
-      <div className="glass-panel overflow-x-auto rounded-xl">
+      <div data-testid="employee-cards" className="space-y-3 lg:hidden">
+        {users.map((user) => (
+          <EmployeeCard
+            key={user.id}
+            user={user}
+            isAdmin={isAdmin}
+            departmentOptions={departmentOptions}
+            permissions={permissionsByUser[user.id] ?? []}
+            onSaved={handleSaved}
+            onDeleted={handleDeleted}
+          />
+        ))}
+      </div>
+
+      <div className="hidden glass-panel overflow-x-auto rounded-xl lg:block">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border-subtle text-text-muted">

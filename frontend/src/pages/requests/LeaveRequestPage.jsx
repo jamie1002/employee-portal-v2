@@ -7,7 +7,7 @@ const LEAVE_TYPES = ["事假", "病假", "特別休假", "公假"];
 const OPTIONAL_REASON_TYPE = "特別休假";
 
 const inputClass =
-  "rounded-lg border border-border-subtle bg-surface-900 px-3 py-2 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
+  "w-full sm:w-auto rounded-lg border border-border-subtle bg-surface-900 px-3 py-2 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
 
 export default function LeaveRequestPage() {
   const navigate = useNavigate();
@@ -142,7 +142,7 @@ export default function LeaveRequestPage() {
             rows={3}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
-            className={`w-full ${inputClass}`}
+            className={`${inputClass} !w-full`}
           />
         </div>
 

@@ -1,6 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 import DepartmentPage from "./DepartmentPage";
+
+// DepartmentPage 同時渲染桌機表格與手機卡片兩套結構（見 docs/UI-SPEC.md §2.4）。
 
 const mockGetDepartments = vi.fn();
 const mockCreateDepartment = vi.fn();
@@ -50,8 +52,9 @@ test("非 admin 完全不渲染頁面內容（RoleGate）", () => {
 test("顯示部門清單含主管與成員人數", async () => {
   render(<DepartmentPage />);
 
-  await waitFor(() => expect(screen.getByText("研發部")).toBeInTheDocument());
-  const row = screen.getByText("研發部").closest("tr");
+  await waitFor(() => expect(screen.getAllByText("研發部").length).toBeGreaterThan(0));
+  const table = within(screen.getByRole("table"));
+  const row = table.getByText("研發部").closest("tr");
   expect(row).toHaveTextContent("王小明");
   expect(row).toHaveTextContent("2");
 });
@@ -59,20 +62,20 @@ test("顯示部門清單含主管與成員人數", async () => {
 test("建立部門成功後新列出現在清單中", async () => {
   mockCreateDepartment.mockResolvedValue({ department: { id: 2, name: "業務部", manager_id: null, manager_name: null, member_count: 0 } });
   render(<DepartmentPage />);
-  await waitFor(() => expect(screen.getByText("研發部")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getAllByText("研發部").length).toBeGreaterThan(0));
 
   fireEvent.change(screen.getByLabelText("部門名稱"), { target: { value: "業務部" } });
   fireEvent.click(screen.getByRole("button", { name: "建立部門" }));
 
-  await waitFor(() => expect(screen.getByText("業務部")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getAllByText("業務部").length).toBeGreaterThan(0));
 });
 
 test("刪除部門需二次確認才會呼叫 API", async () => {
   mockDeleteDepartment.mockResolvedValue({});
   render(<DepartmentPage />);
-  await waitFor(() => expect(screen.getByText("研發部")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getAllByText("研發部").length).toBeGreaterThan(0));
 
-  fireEvent.click(screen.getByRole("button", { name: "刪除" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "刪除" })[0]);
   expect(mockDeleteDepartment).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole("button", { name: "確定刪除？" }));

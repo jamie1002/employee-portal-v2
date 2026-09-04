@@ -7,7 +7,7 @@ import { useRoomBookings } from "../hooks/useRoomBookings";
 import { formatTime } from "../utils/datetime";
 
 const inputClass =
-  "rounded-lg border border-border-subtle bg-surface-900 px-3 py-2 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
+  "w-full sm:w-auto rounded-lg border border-border-subtle bg-surface-900 px-3 py-2 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
 
 export default function VenueBookingPage() {
   const { user } = useAuth();
@@ -67,19 +67,21 @@ export default function VenueBookingPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-xl font-medium text-text-primary">場地借用</h2>
-        <div className="flex items-center gap-3">
-          <label htmlFor="venue-date" className="text-xs text-text-muted">
-            日期
-          </label>
-          <input
-            id="venue-date"
-            type="date"
-            value={date ?? ""}
-            onChange={(event) => setDateOverride(event.target.value)}
-            className={inputClass}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-3">
+            <label htmlFor="venue-date" className="shrink-0 text-xs text-text-muted">
+              日期
+            </label>
+            <input
+              id="venue-date"
+              type="date"
+              value={date ?? ""}
+              onChange={(event) => setDateOverride(event.target.value)}
+              className={inputClass}
+            />
+          </div>
           <button
             type="button"
             onClick={() => openFormForSlot(rooms[0]?.id, "")}
@@ -120,8 +122,8 @@ export default function VenueBookingPage() {
       )}
 
       {selectedBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="glass-panel w-full max-w-md space-y-3 rounded-xl p-6">
+        <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/60 sm:items-center sm:p-4">
+          <div className="glass-panel h-full w-full space-y-3 overflow-y-auto rounded-none p-6 sm:h-auto sm:max-w-md sm:rounded-xl">
             <h3 className="text-lg font-medium text-text-primary">{selectedBooking.title}</h3>
             <p className="text-sm text-text-secondary">{selectedBooking.room_name}</p>
             <p className="text-sm text-text-secondary">

@@ -37,7 +37,7 @@ export default function DemoClockControl() {
   }
 
   return (
-    <div className="flex items-center gap-2 text-sm text-text-secondary">
+    <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
       <span>展示時間：{formatDisplay(virtualNow)}</span>
       <input
         type="datetime-local"

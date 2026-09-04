@@ -27,14 +27,16 @@ test("admin 建立部門、國定假日、修改考勤設定，並授予權限�
   await expect(page.getByRole("heading", { name: "部門管理" })).toBeVisible();
   await page.getByLabel("部門名稱").fill("行銷部");
   await page.getByRole("button", { name: "建立部門" }).click();
-  await expect(page.getByText("行銷部")).toBeVisible();
+  // 桌機／手機雙結構同時渲染（見 docs/UI-SPEC.md §2.4），role="cell" 只會對應
+  // 桌機表格版（卡片版是 <div>，不掛 cell 角色），可正確排除隱藏的那一份。
+  await expect(page.getByRole("cell", { name: "行銷部" })).toBeVisible();
 
   // 國定假日：新增一筆。
   await page.getByRole("link", { name: "國定假日" }).click();
   await page.getByLabel("日期").fill("2026-12-25");
   await page.getByLabel("名稱").fill("聖誕節（示範）");
   await page.getByRole("button", { name: "新增假日" }).click();
-  await expect(page.getByText("聖誕節（示範）")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "聖誕節（示範）" })).toBeVisible();
 
   // 考勤設定：調整緩衝時間並確認成功訊息。
   await page.getByRole("link", { name: "考勤設定" }).click();
@@ -70,5 +72,5 @@ test("資料庫管理頁可切換資料表與檢視結構定義", async ({ page 
   await page.getByLabel("資料表").selectOption("users");
   await expect(page.getByLabel("資料表")).toHaveValue("users");
   await page.getByRole("button", { name: "結構定義" }).click();
-  await expect(page.getByText("email")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "email" })).toBeVisible();
 });

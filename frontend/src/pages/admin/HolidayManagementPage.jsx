@@ -38,26 +38,29 @@ function CreateHolidayForm({ onCreated }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="glass-panel flex flex-wrap items-end gap-3 rounded-xl p-4">
+    <form onSubmit={handleSubmit} className="glass-panel flex flex-col items-stretch gap-3 rounded-xl p-4 sm:flex-row sm:flex-wrap sm:items-end">
       {error && <p className="w-full text-sm text-status-danger">{error}</p>}
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="holiday-date" className="mb-1 block text-xs text-text-muted">
           日期
         </label>
         <input
           id="holiday-date" type="date" required value={holidayDate}
-          onChange={(e) => setHolidayDate(e.target.value)} className={inputClass}
+          onChange={(e) => setHolidayDate(e.target.value)} className={`w-full sm:w-auto ${inputClass}`}
         />
       </div>
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="holiday-name" className="mb-1 block text-xs text-text-muted">
           名稱
         </label>
-        <input id="holiday-name" required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+        <input
+          id="holiday-name" required value={name} onChange={(e) => setName(e.target.value)}
+          className={`w-full sm:w-auto ${inputClass}`}
+        />
       </div>
       <button
         type="submit" disabled={isSubmitting}
-        className="rounded-lg bg-accent-500 px-4 py-2 text-sm font-medium text-surface-950 hover:bg-accent-600 disabled:opacity-50"
+        className="min-h-11 rounded-lg bg-accent-500 px-4 py-2 text-sm font-medium text-surface-950 hover:bg-accent-600 disabled:opacity-50"
       >
         {isSubmitting ? "新增中…" : "新增假日"}
       </button>
@@ -104,7 +107,24 @@ function HolidayContent() {
 
       {error && <p className="text-sm text-status-danger">{error}</p>}
 
-      <div className="glass-panel overflow-x-auto rounded-xl">
+      <div data-testid="holiday-cards" className="space-y-3 lg:hidden">
+        {holidays.map((holiday) => (
+          <div key={holiday.holiday_date} className="glass-panel flex items-center justify-between gap-3 rounded-xl p-4">
+            <div>
+              <p className="text-base font-medium text-text-primary">{holiday.holiday_date}</p>
+              <p className="text-sm text-text-secondary">{holiday.name}</p>
+            </div>
+            <button
+              type="button" onClick={() => handleDelete(holiday.holiday_date)}
+              className="inline-flex min-h-11 items-center rounded-lg px-3 text-xs text-status-danger hover:underline"
+            >
+              刪除
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden glass-panel overflow-x-auto rounded-xl lg:block">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border-subtle text-text-muted">

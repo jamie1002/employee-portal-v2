@@ -40,8 +40,11 @@ export default function BookingFormDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <form onSubmit={handleSubmit} className="glass-panel w-full max-w-md space-y-4 rounded-xl p-6">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/60 sm:items-center sm:p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="glass-panel h-full w-full space-y-4 overflow-y-auto rounded-none p-6 sm:h-auto sm:max-w-md sm:rounded-xl"
+      >
         <h3 className="text-lg font-medium text-text-primary">新增預約</h3>
 
         {(localError || errorMessage) && (

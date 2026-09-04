@@ -46,7 +46,7 @@ const COLUMNS_BY_KIND = {
 };
 
 const inputClass =
-  "rounded-lg border border-border-subtle bg-surface-900 px-2 py-1 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
+  "w-full sm:w-auto rounded-lg border border-border-subtle bg-surface-900 px-2 py-1 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
 
 // FileReader 而非 Blob.text()：兩者在真實瀏覽器都能用，但 FileReader 在測試
 // 環境（jsdom）也有完整支援，Blob.text() 沒有——用它才能在 CI 裡跑得動這段。
@@ -297,31 +297,51 @@ function ExportContent() {
       </div>
 
       {preview && (
-        <div className="glass-panel overflow-x-auto rounded-xl">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border-subtle text-text-muted">
-                {preview.columns.map((column) => (
-                  <th key={column.key} className="whitespace-nowrap px-4 py-3">
-                    {column.label}
-                  </th>
+        <>
+          <div data-testid="export-preview-cards" className="space-y-3 lg:hidden">
+            {preview.rows.map((row, index) => (
+              <div key={index} className="glass-panel space-y-2 rounded-xl p-4">
+                {preview.columns.map((column, columnIndex) => (
+                  <div key={column.key}>
+                    <dt className="text-xs text-text-muted">{column.label}</dt>
+                    <dd className="mt-0.5 text-sm text-text-primary">
+                      {row[columnIndex] === null || row[columnIndex] === undefined ? "—" : String(row[columnIndex])}
+                    </dd>
+                  </div>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {preview.rows.map((row, index) => (
-                <tr key={index} className="border-b border-border-subtle last:border-0">
-                  {row.map((value, cellIndex) => (
-                    <td key={cellIndex} className="whitespace-nowrap px-4 py-3 text-text-primary">
-                      {value === null || value === undefined ? "—" : String(value)}
-                    </td>
+              </div>
+            ))}
+            {preview.rows.length === 0 && (
+              <p className="glass-panel rounded-xl p-4 text-sm text-text-muted">查無資料。</p>
+            )}
+          </div>
+
+          <div className="hidden glass-panel overflow-x-auto rounded-xl lg:block">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-border-subtle text-text-muted">
+                  {preview.columns.map((column) => (
+                    <th key={column.key} className="whitespace-nowrap px-4 py-3">
+                      {column.label}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {preview.rows.length === 0 && <p className="p-4 text-sm text-text-muted">查無資料。</p>}
-        </div>
+              </thead>
+              <tbody>
+                {preview.rows.map((row, index) => (
+                  <tr key={index} className="border-b border-border-subtle last:border-0">
+                    {row.map((value, cellIndex) => (
+                      <td key={cellIndex} className="whitespace-nowrap px-4 py-3 text-text-primary">
+                        {value === null || value === undefined ? "—" : String(value)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {preview.rows.length === 0 && <p className="p-4 text-sm text-text-muted">查無資料。</p>}
+          </div>
+        </>
       )}
     </div>
   );

@@ -10,9 +10,9 @@ function eligibleManagers(users) {
   return users.filter((u) => u.role === "manager" || u.role === "admin");
 }
 
-function ManagerSelect({ value, onChange, managers, id }) {
+function ManagerSelect({ value, onChange, managers, id, className = "" }) {
   return (
-    <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={inputClass}>
+    <select id={id} value={value} onChange={(event) => onChange(event.target.value)} className={`${inputClass} ${className}`}>
       <option value="">無</option>
       {managers.map((manager) => (
         <option key={manager.id} value={manager.id}>
@@ -50,25 +50,29 @@ function CreateDepartmentForm({ managers, onCreated }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="glass-panel flex flex-wrap items-end gap-3 rounded-xl p-4">
+    <form onSubmit={handleSubmit} className="glass-panel flex flex-col items-stretch gap-3 rounded-xl p-4 sm:flex-row sm:flex-wrap sm:items-end">
       {error && <p className="w-full text-sm text-status-danger">{error}</p>}
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="new-department-name" className="mb-1 block text-xs text-text-muted">
           部門名稱
         </label>
         <input
-          id="new-department-name" required value={name} onChange={(e) => setName(e.target.value)} className={inputClass}
+          id="new-department-name" required value={name} onChange={(e) => setName(e.target.value)}
+          className={`w-full sm:w-auto ${inputClass}`}
         />
       </div>
-      <div>
+      <div className="w-full sm:w-auto">
         <label htmlFor="new-department-manager" className="mb-1 block text-xs text-text-muted">
           主管
         </label>
-        <ManagerSelect id="new-department-manager" value={managerId} onChange={setManagerId} managers={managers} />
+        <ManagerSelect
+          id="new-department-manager" value={managerId} onChange={setManagerId} managers={managers}
+          className="w-full sm:w-auto"
+        />
       </div>
       <button
         type="submit" disabled={isSubmitting}
-        className="rounded-lg bg-accent-500 px-4 py-2 text-sm font-medium text-surface-950 hover:bg-accent-600 disabled:opacity-50"
+        className="min-h-11 rounded-lg bg-accent-500 px-4 py-2 text-sm font-medium text-surface-950 hover:bg-accent-600 disabled:opacity-50"
       >
         {isSubmitting ? "建立中…" : "建立部門"}
       </button>
@@ -182,6 +186,131 @@ function DepartmentRow({ department, managers, onSaved, onDeleted }) {
   );
 }
 
+// 卡片版與 DepartmentRow 平行存在、各自管理自己的本地 state（同 EmployeePage 的取捨，
+// 見 docs/UI-SPEC.md §2.4）。
+function DepartmentCard({ department, managers, onSaved, onDeleted }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(department.name);
+  const [managerId, setManagerId] = useState(department.manager_id ?? "");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function startEdit() {
+    setName(department.name);
+    setManagerId(department.manager_id ?? "");
+    setError("");
+    setIsEditing(true);
+  }
+
+  async function handleSave() {
+    setIsSubmitting(true);
+    setError("");
+    try {
+      const { department: updated } = await updateDepartment(department.id, {
+        name,
+        manager_id: managerId ? Number(managerId) : null,
+      });
+      onSaved(updated);
+      setIsEditing(false);
+    } catch (err) {
+      setError(err.response?.data?.error?.message ?? "更新失敗，請稍後再試。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleDelete() {
+    setIsSubmitting(true);
+    setError("");
+    try {
+      await deleteDepartment(department.id);
+      onDeleted(department.id);
+    } catch (err) {
+      setError(err.response?.data?.error?.message ?? "刪除失敗，請稍後再試。");
+      setIsSubmitting(false);
+    }
+  }
+
+  const cardButtonClass = "inline-flex min-h-11 items-center rounded-lg px-3 text-xs";
+
+  if (isEditing) {
+    return (
+      <div className="glass-panel space-y-3 rounded-xl p-4">
+        {error && <p className="text-xs text-status-danger">{error}</p>}
+        <div>
+          <label htmlFor={`card-department-name-${department.id}`} className="mb-1 block text-xs text-text-muted">
+            部門名稱
+          </label>
+          <input
+            id={`card-department-name-${department.id}`} value={name} onChange={(e) => setName(e.target.value)}
+            className={`w-full ${inputClass}`}
+          />
+        </div>
+        <div>
+          <label htmlFor={`card-department-manager-${department.id}`} className="mb-1 block text-xs text-text-muted">
+            主管
+          </label>
+          <ManagerSelect
+            id={`card-department-manager-${department.id}`} value={managerId} onChange={setManagerId} managers={managers}
+            className="w-full"
+          />
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button" disabled={isSubmitting} onClick={handleSave}
+            className={`${cardButtonClass} bg-accent-500 font-medium text-surface-950 disabled:opacity-50`}
+          >
+            儲存
+          </button>
+          <button type="button" onClick={() => setIsEditing(false)} className={`${cardButtonClass} border border-border-subtle text-text-secondary`}>
+            取消
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="glass-panel space-y-2 rounded-xl p-4">
+      <p className="text-base font-medium text-text-primary">{department.name}</p>
+      <dl className="grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <dt className="text-text-muted">主管</dt>
+          <dd className="text-text-secondary">{department.manager_name ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">成員人數</dt>
+          <dd className="text-text-secondary">{department.member_count}</dd>
+        </div>
+      </dl>
+      <div className="flex flex-wrap gap-3 border-t border-border-subtle pt-2">
+        <button type="button" onClick={startEdit} className={`${cardButtonClass} border border-border-subtle text-accent-400`}>
+          編輯
+        </button>
+        {confirmingDelete ? (
+          <>
+            <button
+              type="button" disabled={isSubmitting} onClick={handleDelete}
+              className={`${cardButtonClass} border border-status-danger text-status-danger disabled:opacity-50`}
+            >
+              確定刪除？
+            </button>
+            <button type="button" onClick={() => setConfirmingDelete(false)} className={`${cardButtonClass} border border-border-subtle text-text-secondary`}>
+              取消
+            </button>
+          </>
+        ) : (
+          <button type="button" onClick={() => setConfirmingDelete(true)} className={`${cardButtonClass} border border-status-danger text-status-danger`}>
+            刪除
+          </button>
+        )}
+        {error && <p className="text-xs text-status-danger">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 function DepartmentContent() {
   const [departments, setDepartments] = useState([]);
   const [users, setUsers] = useState([]);
@@ -217,7 +346,16 @@ function DepartmentContent() {
 
       <CreateDepartmentForm managers={managers} onCreated={handleCreated} />
 
-      <div className="glass-panel overflow-x-auto rounded-xl">
+      <div data-testid="department-cards" className="space-y-3 lg:hidden">
+        {departments.map((department) => (
+          <DepartmentCard
+            key={department.id} department={department} managers={managers}
+            onSaved={handleSaved} onDeleted={handleDeleted}
+          />
+        ))}
+      </div>
+
+      <div className="hidden glass-panel overflow-x-auto rounded-xl lg:block">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border-subtle text-text-muted">

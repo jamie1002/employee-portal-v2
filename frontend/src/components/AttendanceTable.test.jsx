@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 import AttendanceTable from "./AttendanceTable";
 
@@ -26,29 +26,43 @@ beforeEach(() => {
   mockGetChanges.mockResolvedValue({ changes: [] });
 });
 
+// 桌機表格版（role="table" 唯一）與手機卡片版（data-testid="attendance-cards"）
+// 同一份資料會渲染兩份 DOM——這是刻意的雙結構（見 docs/UI-SPEC.md §2.4），
+// 桌機斷言一律 scope 進 <table>，避免撞上卡片版的重複文字。
+
 test("沒有紀錄時顯示空狀態", () => {
   render(<AttendanceTable records={[]} />);
 
   expect(screen.getByText("尚無出勤紀錄。")).toBeInTheDocument();
 });
 
-test("顯示日期、時間與工時", () => {
+test("顯示日期、時間與工時（桌機表格版）", () => {
   render(<AttendanceTable records={[BASE_RECORD]} />);
 
-  expect(screen.getByText("2026-08-24")).toBeInTheDocument();
-  expect(screen.getByText("09:00")).toBeInTheDocument();
-  expect(screen.getByText("8.00")).toBeInTheDocument();
+  const table = within(screen.getByRole("table"));
+  expect(table.getByText("2026-08-24")).toBeInTheDocument();
+  expect(table.getByText("09:00")).toBeInTheDocument();
+  expect(table.getByText("8.00")).toBeInTheDocument();
+});
+
+test("顯示日期、時間與工時（手機卡片版）", () => {
+  render(<AttendanceTable records={[BASE_RECORD]} />);
+
+  const cards = within(screen.getByTestId("attendance-cards"));
+  expect(cards.getByText("2026-08-24")).toBeInTheDocument();
+  expect(cards.getByText("09:00")).toBeInTheDocument();
+  expect(cards.getByText("8.00")).toBeInTheDocument();
 });
 
 test("has_changes 與 is_adjusted 是兩種不同的標記，不可混為一談", () => {
   const { rerender } = render(<AttendanceTable records={[{ ...BASE_RECORD, has_changes: true }]} />);
 
-  expect(screen.getByText("有異動申請")).toBeInTheDocument();
+  expect(screen.getAllByText("有異動申請").length).toBeGreaterThan(0);
   expect(screen.queryByText("已異動")).not.toBeInTheDocument();
 
   rerender(<AttendanceTable records={[{ ...BASE_RECORD, is_adjusted: true }]} />);
 
-  expect(screen.getByText("已異動")).toBeInTheDocument();
+  expect(screen.getAllByText("已異動").length).toBeGreaterThan(0);
   expect(screen.queryByText("有異動申請")).not.toBeInTheDocument();
 });
 
@@ -74,7 +88,7 @@ test("勾選顯示異動後才去載入申請明細", async () => {
 
   fireEvent.click(screen.getByRole("checkbox"));
 
-  await waitFor(() => expect(screen.getByText("補打卡申請")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getAllByText("補打卡申請").length).toBeGreaterThan(0));
   expect(mockGetChanges).toHaveBeenCalledWith(
     expect.objectContaining({ start_date: "2026-08-24", end_date: "2026-08-24" }),
   );
@@ -88,6 +102,6 @@ test("showUser 模式多顯示姓名與部門欄", () => {
     />,
   );
 
-  expect(screen.getByText("陳小華")).toBeInTheDocument();
-  expect(screen.getByText("研發部")).toBeInTheDocument();
+  expect(screen.getAllByText("陳小華").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("研發部").length).toBeGreaterThan(0);
 });

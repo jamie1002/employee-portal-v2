@@ -106,7 +106,7 @@ test("點預覽會呼叫 getExportPreview 並顯示結果表格", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "預覽" }));
 
-  await waitFor(() => expect(screen.getByText("陳小華")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getAllByText("陳小華").length).toBeGreaterThan(0));
   expect(mockGetExportPreview).toHaveBeenCalledWith("employees", {}, expect.arrayContaining(["name"]));
 });
 

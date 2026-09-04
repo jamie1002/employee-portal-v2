@@ -55,7 +55,7 @@ export default function AttendancePage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const inputClass =
-    "rounded-lg border border-border-subtle bg-surface-900 px-3 py-2 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
+    "w-full sm:w-auto rounded-lg border border-border-subtle bg-surface-900 px-3 py-2 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
 
   return (
     <div className="space-y-4">

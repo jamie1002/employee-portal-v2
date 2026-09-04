@@ -25,8 +25,8 @@ export default function PunchOutConfirmDialog({
     : "已超過原本預計下班時間一小時以上";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="glass-panel w-full max-w-sm space-y-4 rounded-xl p-6">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/60 sm:items-center sm:p-4">
+      <div className="glass-panel h-full w-full space-y-4 overflow-y-auto rounded-none p-6 sm:h-auto sm:max-w-sm sm:rounded-xl">
         <h3 className="text-lg font-medium text-text-primary">下班時間較晚</h3>
         <p className="text-sm text-text-secondary">
           {canApplyOvertime

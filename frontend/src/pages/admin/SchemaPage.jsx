@@ -11,63 +11,114 @@ function DataPreviewTable({ rows }) {
   }
   const columns = Object.keys(rows[0]);
   return (
-    <div className="glass-panel overflow-x-auto rounded-xl">
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-border-subtle text-text-muted">
+    <>
+      <div data-testid="schema-data-cards" className="space-y-3 lg:hidden">
+        {rows.map((row, index) => (
+          <div key={index} className="glass-panel space-y-2 rounded-xl p-4">
             {columns.map((column) => (
-              <th key={column} className="whitespace-nowrap px-4 py-3">
-                {column}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index} className="border-b border-border-subtle last:border-0">
-              {columns.map((column) => (
-                <td key={column} className="whitespace-nowrap px-4 py-3 text-text-primary">
+              <div key={column}>
+                <dt className="text-xs text-text-muted">{column}</dt>
+                <dd className="mt-0.5 break-all text-sm text-text-primary">
                   {row[column] === null || row[column] === undefined ? "—" : String(row[column])}
-                </td>
+                </dd>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden glass-panel overflow-x-auto rounded-xl lg:block">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-border-subtle text-text-muted">
+              {columns.map((column) => (
+                <th key={column} className="whitespace-nowrap px-4 py-3">
+                  {column}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={index} className="border-b border-border-subtle last:border-0">
+                {columns.map((column) => (
+                  <td key={column} className="whitespace-nowrap px-4 py-3 text-text-primary">
+                    {row[column] === null || row[column] === undefined ? "—" : String(row[column])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
 function StructureTable({ columns }) {
   return (
-    <div className="glass-panel overflow-x-auto rounded-xl">
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-border-subtle text-text-muted">
-            <th className="px-4 py-3">欄位名稱</th>
-            <th className="px-4 py-3">型別</th>
-            <th className="px-4 py-3">可為 NULL</th>
-            <th className="px-4 py-3">主鍵</th>
-            <th className="px-4 py-3">外鍵參照</th>
-            <th className="px-4 py-3">預設值</th>
-          </tr>
-        </thead>
-        <tbody>
-          {columns.map((column) => (
-            <tr key={column.name} className="border-b border-border-subtle last:border-0">
-              <td className="px-4 py-3 text-text-primary">{column.name}</td>
-              <td className="px-4 py-3 text-text-primary">{column.type}</td>
-              <td className="px-4 py-3 text-text-primary">{column.nullable ? "是" : "否"}</td>
-              <td className="px-4 py-3 text-text-primary">{column.is_primary_key ? "是" : "—"}</td>
-              <td className="px-4 py-3 text-text-primary">
-                {column.is_foreign_key ? `${column.references.table}.${column.references.column}` : "—"}
-              </td>
-              <td className="px-4 py-3 text-text-primary">{column.default ?? "—"}</td>
+    <>
+      <div data-testid="schema-structure-cards" className="space-y-3 lg:hidden">
+        {columns.map((column) => (
+          <div key={column.name} className="glass-panel space-y-2 rounded-xl p-4">
+            <p className="text-base font-medium text-text-primary">{column.name}</p>
+            <dl className="grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <dt className="text-text-muted">型別</dt>
+                <dd className="text-text-secondary">{column.type}</dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">可為 NULL</dt>
+                <dd className="text-text-secondary">{column.nullable ? "是" : "否"}</dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">主鍵</dt>
+                <dd className="text-text-secondary">{column.is_primary_key ? "是" : "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">外鍵參照</dt>
+                <dd className="text-text-secondary">
+                  {column.is_foreign_key ? `${column.references.table}.${column.references.column}` : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">預設值</dt>
+                <dd className="text-text-secondary">{column.default ?? "—"}</dd>
+              </div>
+            </dl>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden glass-panel overflow-x-auto rounded-xl lg:block">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-border-subtle text-text-muted">
+              <th className="px-4 py-3">欄位名稱</th>
+              <th className="px-4 py-3">型別</th>
+              <th className="px-4 py-3">可為 NULL</th>
+              <th className="px-4 py-3">主鍵</th>
+              <th className="px-4 py-3">外鍵參照</th>
+              <th className="px-4 py-3">預設值</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {columns.map((column) => (
+              <tr key={column.name} className="border-b border-border-subtle last:border-0">
+                <td className="px-4 py-3 text-text-primary">{column.name}</td>
+                <td className="px-4 py-3 text-text-primary">{column.type}</td>
+                <td className="px-4 py-3 text-text-primary">{column.nullable ? "是" : "否"}</td>
+                <td className="px-4 py-3 text-text-primary">{column.is_primary_key ? "是" : "—"}</td>
+                <td className="px-4 py-3 text-text-primary">
+                  {column.is_foreign_key ? `${column.references.table}.${column.references.column}` : "—"}
+                </td>
+                <td className="px-4 py-3 text-text-primary">{column.default ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

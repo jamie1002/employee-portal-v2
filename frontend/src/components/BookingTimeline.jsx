@@ -32,43 +32,46 @@ export default function BookingTimeline({ date, rooms, bookings, currentUserId, 
   }
 
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[720px]">
-        <div className="ml-32 flex border-b border-border-subtle text-xs text-text-muted">
-          {HOUR_MARKS.map((hour) => (
-            <div key={hour} className="flex-1 py-1 text-center">
-              {String(hour).padStart(2, "0")}:00
+    <div>
+      <p className="mb-1 text-xs text-text-muted sm:hidden">← 左右滑動查看場地時段 →</p>
+      <div className="overflow-x-auto">
+        <div className="min-w-[720px]">
+          <div className="ml-32 flex border-b border-border-subtle text-xs text-text-muted">
+            {HOUR_MARKS.map((hour) => (
+              <div key={hour} className="flex-1 py-1 text-center">
+                {String(hour).padStart(2, "0")}:00
+              </div>
+            ))}
+          </div>
+
+          {bookings.length === 0 && (
+            <p className="py-4 text-sm text-text-muted">這一天目前沒有任何場地預約。</p>
+          )}
+
+          {rooms.map((room) => (
+            <div key={room.id} className="flex items-stretch border-b border-border-subtle">
+              <div className="w-32 shrink-0 py-3 pr-3 text-sm text-text-secondary">{room.name}</div>
+              <div
+                data-testid={`room-track-${room.id}`}
+                onClick={(event) => handleTrackClick(event, room.id)}
+                className="relative h-14 flex-1 cursor-pointer bg-surface-800 sm:h-12"
+              >
+                {bookings
+                  .filter((booking) => booking.room_id === room.id)
+                  .map((booking) => (
+                    <BookingBlock
+                      key={booking.id}
+                      booking={booking}
+                      rangeStart={rangeStart}
+                      rangeEnd={rangeEnd}
+                      currentUserId={currentUserId}
+                      onClick={onBlockClick}
+                    />
+                  ))}
+              </div>
             </div>
           ))}
         </div>
-
-        {bookings.length === 0 && (
-          <p className="py-4 text-sm text-text-muted">這一天目前沒有任何場地預約。</p>
-        )}
-
-        {rooms.map((room) => (
-          <div key={room.id} className="flex items-stretch border-b border-border-subtle">
-            <div className="w-32 shrink-0 py-3 pr-3 text-sm text-text-secondary">{room.name}</div>
-            <div
-              data-testid={`room-track-${room.id}`}
-              onClick={(event) => handleTrackClick(event, room.id)}
-              className="relative h-12 flex-1 cursor-pointer bg-surface-800"
-            >
-              {bookings
-                .filter((booking) => booking.room_id === room.id)
-                .map((booking) => (
-                  <BookingBlock
-                    key={booking.id}
-                    booking={booking}
-                    rangeStart={rangeStart}
-                    rangeEnd={rangeEnd}
-                    currentUserId={currentUserId}
-                    onClick={onBlockClick}
-                  />
-                ))}
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

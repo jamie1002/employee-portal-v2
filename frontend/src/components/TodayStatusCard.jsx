@@ -23,7 +23,7 @@ export default function TodayStatusCard({ today }) {
         />
       </div>
 
-      <dl className="mt-4 grid grid-cols-3 gap-4 text-sm">
+      <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3 sm:gap-4">
         <div>
           <dt className="text-text-muted">上班時間</dt>
           <dd className="mt-1 text-text-primary">{formatTime(punchInTime)}</dd>

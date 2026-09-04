@@ -1,6 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 import ReviewCenterPage from "./ReviewCenterPage";
+
+// RequestTable 同時渲染桌機表格與手機卡片兩套結構（見 docs/UI-SPEC.md §2.4），
+// 互動一律 scope 進 <table>（role="table" 唯一），避免撞上卡片版的重複元素。
 
 const mockGetPending = vi.fn();
 const mockReview = vi.fn();
@@ -36,9 +39,9 @@ test("分頁標籤顯示各類型的待審筆數", async () => {
 test("核准後該筆從清單移除", async () => {
   mockReview.mockResolvedValue({ request: { ...PUNCH_REQUEST, status: "approved" } });
   render(<ReviewCenterPage />);
-  await waitFor(() => expect(screen.getByText("陳小華")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getAllByText("陳小華").length).toBeGreaterThan(0));
 
-  fireEvent.click(screen.getByRole("button", { name: "核准" }));
+  fireEvent.click(within(screen.getByRole("table")).getByRole("button", { name: "核准" }));
 
   await waitFor(() => expect(screen.queryByText("陳小華")).not.toBeInTheDocument());
   expect(mockReview).toHaveBeenCalledWith(1, { action: "approve" });
@@ -47,9 +50,9 @@ test("核准後該筆從清單移除", async () => {
 test("遇到 409 時顯示提示並重新載入清單", async () => {
   mockReview.mockRejectedValue({ response: { status: 409 } });
   render(<ReviewCenterPage />);
-  await waitFor(() => expect(screen.getByText("陳小華")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getAllByText("陳小華").length).toBeGreaterThan(0));
 
-  fireEvent.click(screen.getByRole("button", { name: "核准" }));
+  fireEvent.click(within(screen.getByRole("table")).getByRole("button", { name: "核准" }));
 
   await waitFor(() =>
     expect(screen.getByText("此申請已被其他人審核，清單已重新載入。")).toBeInTheDocument(),

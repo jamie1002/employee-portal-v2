@@ -73,6 +73,72 @@ function ChangeEntry({ change }) {
   );
 }
 
+function AttendanceCard({ record, showUser, relatedChanges }) {
+  return (
+    <div className="glass-panel space-y-2 rounded-xl p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-base font-medium text-text-primary">
+            {record.punch_date}
+            {record.has_changes && (
+              <span
+                title="當天有補打卡或請假申請"
+                className="ml-1.5 rounded-full border border-border-strong px-1.5 py-0 text-[10px] text-text-secondary"
+              >
+                有異動申請
+              </span>
+            )}
+          </p>
+          {showUser && (
+            <p className="text-sm text-text-secondary">
+              {record.user_name}　{record.department_name ?? "—"}
+            </p>
+          )}
+        </div>
+        <AttendanceStatusBadges
+          status={record.effective_status}
+          isEarlyLeave={record.effective_is_early_leave}
+          isMissingPunchOut={record.is_missing_punch_out}
+        />
+      </div>
+
+      <dl className="grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <dt className="text-text-muted">上班時間</dt>
+          <dd className="text-text-secondary">
+            {formatTime(record.effective_punch_in_time)}
+            {record.is_adjusted && (
+              <span className="ml-1.5 rounded-full border border-accent-500/60 px-1.5 py-0 text-[10px] text-accent-400">
+                已異動
+              </span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">下班時間</dt>
+          <dd className="text-text-secondary">{formatTime(record.effective_punch_out_time)}</dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">工時</dt>
+          <dd className="text-text-primary">{record.effective_work_hours ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">備註</dt>
+          <dd className="text-text-secondary">{record.note ?? "—"}</dd>
+        </div>
+      </dl>
+
+      {relatedChanges && relatedChanges.length > 0 && (
+        <div className="space-y-1 border-t border-border-subtle pt-2">
+          {relatedChanges.map((change) => (
+            <ChangeEntry key={`${change.source}-${change.request_id}`} change={change} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AttendanceTable({ records, showUser = false, filters }) {
   const [showChanges, setShowChanges] = useState(false);
   const [changesMap, setChangesMap] = useState(new Map());
@@ -116,7 +182,18 @@ export default function AttendanceTable({ records, showUser = false, filters }) 
         顯示異動{isLoadingChanges && "（載入中…）"}
       </label>
 
-      <div className="glass-panel overflow-x-auto rounded-xl">
+      <div data-testid="attendance-cards" className="space-y-3 lg:hidden">
+        {records.map((record) => (
+          <AttendanceCard
+            key={`${record.user_id}_${record.punch_date}`}
+            record={record}
+            showUser={showUser}
+            relatedChanges={showChanges ? changesMap.get(`${record.user_id}_${record.punch_date}`) : null}
+          />
+        ))}
+      </div>
+
+      <div className="hidden glass-panel overflow-x-auto rounded-xl lg:block">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border-subtle text-text-muted">
