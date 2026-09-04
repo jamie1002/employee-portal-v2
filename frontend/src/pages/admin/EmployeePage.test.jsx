@@ -122,6 +122,13 @@ test("編輯員工並變更權限後儲存，只在權限真的變動時才呼�
   fireEvent.click(screen.getByLabelText("考勤設定")); // 新增
   fireEvent.click(screen.getByRole("button", { name: "完成" }));
 
+  // 按「完成」後、按「儲存」前：畫面要立刻反映勾選草稿，不等儲存才顯示
+  // （桌機表格版尚未進入編輯模式，仍合理顯示原本已授予的權限，故只斷言
+  // 正在編輯的這份草稿本身，不對整頁做排他性斷言）。
+  expect(screen.getAllByText("考勤設定").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("尚未儲存").length).toBeGreaterThan(0);
+  expect(mockSetUserPermissions).not.toHaveBeenCalled();
+
   fireEvent.click(screen.getByRole("button", { name: "儲存" }));
 
   await waitFor(() => expect(mockUpdateUser).toHaveBeenCalled());

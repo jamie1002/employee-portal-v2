@@ -1,6 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { createLeaveRequest } from "../../api/requests.api";
+import { getSettings } from "../../api/settings.api";
+
+// 後端 TIME 欄位序列化含秒（"09:00:00"），<input type="time"> 只吃 "HH:mm"。
+function toInputTime(value) {
+  return value ? value.slice(0, 5) : "";
+}
 
 const LEAVE_TYPES = ["事假", "病假", "特別休假", "公假"];
 // 特別休假（年假）是員工自己的權益假別，不強制填理由；其餘假別仍為必填（SPEC.md §4.3）。
@@ -22,8 +28,26 @@ export default function LeaveRequestPage() {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isFullDay, setIsFullDay] = useState(false);
+  const [workHours, setWorkHours] = useState({ start: "", end: "" });
 
   const isReasonRequired = leaveType !== OPTIONAL_REASON_TYPE;
+
+  useEffect(() => {
+    getSettings().then(({ settings }) => {
+      setWorkHours({ start: toInputTime(settings.work_start_time), end: toInputTime(settings.work_end_time) });
+    });
+  }, []);
+
+  // 「整天」勾選框自動帶入表定上下班時間（UI-SPEC.md §3.8）；勾選期間時間欄位
+  // 停用，避免使用者手動改動後跟畫面上的「整天」語意不一致。
+  function handleFullDayChange(checked) {
+    setIsFullDay(checked);
+    if (checked) {
+      setStartTime(workHours.start);
+      setEndTime(workHours.end);
+    }
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -70,6 +94,16 @@ export default function LeaveRequestPage() {
           </select>
         </div>
 
+        <label className="flex items-center gap-2 text-sm text-text-primary">
+          <input
+            type="checkbox"
+            checked={isFullDay}
+            onChange={(event) => handleFullDayChange(event.target.checked)}
+            className="rounded border-border-subtle"
+          />
+          整天（自動帶入表定上下班時間 {workHours.start} ~ {workHours.end}）
+        </label>
+
         <div className="flex flex-wrap gap-4">
           <div>
             <label htmlFor="start-date" className="mb-1 block text-xs text-text-muted">
@@ -92,9 +126,10 @@ export default function LeaveRequestPage() {
               id="start-time"
               type="time"
               required
+              disabled={isFullDay}
               value={startTime}
               onChange={(event) => setStartTime(event.target.value)}
-              className={inputClass}
+              className={`${inputClass} disabled:opacity-50`}
             />
           </div>
         </div>
@@ -121,9 +156,10 @@ export default function LeaveRequestPage() {
               id="end-time"
               type="time"
               required
+              disabled={isFullDay}
               value={endTime}
               onChange={(event) => setEndTime(event.target.value)}
-              className={inputClass}
+              className={`${inputClass} disabled:opacity-50`}
             />
           </div>
         </div>

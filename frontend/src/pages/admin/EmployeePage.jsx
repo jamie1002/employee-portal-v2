@@ -135,20 +135,31 @@ function CreateUserForm({ departmentOptions, onCreated }) {
   );
 }
 
-function PermissionCell({ permissions, onEdit, isEditing }) {
+// 編輯模式下顯示的是**尚未儲存的勾選草稿**（pendingKeys），不是 permissions
+// prop 裡實際已授予的清單——按「完成」只關閉權限面板，要按「儲存」才會真的呼叫
+// API 賦予權限。草稿裡沿用既有授權的項目照樣顯示原本的授予人／時間，新勾選但
+// 還沒儲存的項目改標「尚未儲存」，讓使用者在按儲存前就能看到自己勾了什麼。
+function PermissionCell({ permissions, onEdit, isEditing, pendingKeys }) {
+  const keysToShow = isEditing ? pendingKeys : permissions.map((p) => p.permission);
+
   return (
     <div className="space-y-1">
-      {permissions.length === 0 && <span className="text-text-muted">—</span>}
-      {permissions.map((p) => (
-        <div key={p.permission}>
-          <span className="rounded-full border border-accent-500 px-2 py-0.5 text-xs text-accent-400">
-            {PERMISSION_BADGE_LABELS[p.permission] ?? p.permission}
-          </span>
-          <p className="text-xs text-text-muted">
-            由 {p.granted_by_name ?? "已刪除的帳號"} 於 {formatMonthDay(p.granted_at)} 授予
-          </p>
-        </div>
-      ))}
+      {keysToShow.length === 0 && <span className="text-text-muted">—</span>}
+      {keysToShow.map((key) => {
+        const granted = permissions.find((p) => p.permission === key);
+        return (
+          <div key={key}>
+            <span className="rounded-full border border-accent-500 px-2 py-0.5 text-xs text-accent-400">
+              {PERMISSION_BADGE_LABELS[key] ?? key}
+            </span>
+            <p className="text-xs text-text-muted">
+              {granted
+                ? `由 ${granted.granted_by_name ?? "已刪除的帳號"} 於 ${formatMonthDay(granted.granted_at)} 授予`
+                : "尚未儲存"}
+            </p>
+          </div>
+        );
+      })}
       {isEditing && (
         <button type="button" onClick={onEdit} className="text-xs text-accent-400 hover:underline">
           權限
@@ -258,7 +269,7 @@ function EmployeeRow({ user, isAdmin, departmentOptions, permissions, onSaved, o
         </td>
         {isAdmin && (
           <td className="px-4 py-3">
-            <PermissionCell permissions={permissions} isEditing onEdit={() => setShowPermissionPanel(true)} />
+            <PermissionCell permissions={permissions} isEditing pendingKeys={pendingPermissions} onEdit={() => setShowPermissionPanel(true)} />
           </td>
         )}
         <td className="px-4 py-3">
@@ -482,7 +493,7 @@ function EmployeeCard({ user, isAdmin, departmentOptions, permissions, onSaved, 
         {isAdmin && (
           <div>
             <p className="mb-1 text-xs text-text-muted">額外權限</p>
-            <PermissionCell permissions={permissions} isEditing onEdit={() => setShowPermissionPanel(true)} />
+            <PermissionCell permissions={permissions} isEditing pendingKeys={pendingPermissions} onEdit={() => setShowPermissionPanel(true)} />
           </div>
         )}
         <div className="flex gap-2 pt-1">

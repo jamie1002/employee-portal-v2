@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 import LeaveRequestPage from "./LeaveRequestPage";
@@ -6,6 +6,11 @@ import LeaveRequestPage from "./LeaveRequestPage";
 const mockCreate = vi.fn();
 vi.mock("../../api/requests.api", () => ({
   createLeaveRequest: (...args) => mockCreate(...args),
+}));
+
+const mockGetSettings = vi.hoisted(() => vi.fn());
+vi.mock("../../api/settings.api", () => ({
+  getSettings: (...args) => mockGetSettings(...args),
 }));
 
 const mockNavigate = vi.fn();
@@ -25,6 +30,12 @@ function renderPage() {
 beforeEach(() => {
   mockCreate.mockReset();
   mockNavigate.mockReset();
+  mockGetSettings.mockReset().mockResolvedValue({
+    settings: {
+      work_start_time: "09:00:00", work_end_time: "18:00:00",
+      lunch_start_time: "12:00:00", lunch_end_time: "13:00:00", grace_period_minutes: 10,
+    },
+  });
 });
 
 test("預設假別為事假時申請理由為必填", () => {
@@ -61,4 +72,20 @@ test("送出成功後導向我的申請頁", async () => {
       end_time: "2026-08-24T18:00:00+08:00",
     }),
   );
+});
+
+test("勾選整天會自動帶入表定上下班時間並停用時間欄位", async () => {
+  renderPage();
+
+  await waitFor(() => expect(screen.getByText(/09:00 ~ 18:00/)).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole("checkbox", { name: /整天/ }));
+
+  expect(screen.getByLabelText("開始時間")).toHaveValue("09:00");
+  expect(screen.getByLabelText("開始時間")).toBeDisabled();
+  expect(screen.getByLabelText("結束時間")).toHaveValue("18:00");
+  expect(screen.getByLabelText("結束時間")).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("checkbox", { name: /整天/ }));
+  expect(screen.getByLabelText("開始時間")).not.toBeDisabled();
 });

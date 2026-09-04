@@ -109,7 +109,10 @@ test("異常日未有申請時顯示補打卡／請假快捷連結", async () =>
 test("異常日已有待審補打卡申請時改顯示「已申請，待審核」，不顯示快捷連結", async () => {
   mockGetMyRecords.mockResolvedValue({ records: [EARLY_LEAVE_DAY] });
   mockGetMyPunchRequests.mockResolvedValue({
-    requests: [{ id: 1, target_date: "2026-08-20", type: "in", status: "pending", created_at: "2026-08-20T01:00:00+00:00" }],
+    requests: [{
+      id: 1, target_date: "2026-08-20", type: "in", status: "pending",
+      requested_in_time: "2026-08-20T01:03:00+00:00", created_at: "2026-08-20T01:00:00+00:00",
+    }],
   });
   renderWithRouter({ punchDate: "2026-08-24" });
 
@@ -119,7 +122,10 @@ test("異常日已有待審補打卡申請時改顯示「已申請，待審核�
 
 test("顯示申請中的補打卡／請假／加班清單", async () => {
   mockGetMyPunchRequests.mockResolvedValue({
-    requests: [{ id: 1, target_date: "2026-08-20", type: "in", status: "pending", created_at: "2026-08-20T01:00:00+00:00" }],
+    requests: [{
+      id: 1, target_date: "2026-08-20", type: "in", status: "pending",
+      requested_in_time: "2026-08-20T01:03:00+00:00", created_at: "2026-08-20T01:00:00+00:00",
+    }],
   });
   mockGetMyLeaveRequests.mockResolvedValue({
     requests: [
@@ -133,6 +139,28 @@ test("顯示申請中的補打卡／請假／加班清單", async () => {
   renderWithRouter({ punchDate: "2026-08-24" });
 
   await waitFor(() => expect(screen.getByText("申請中（2）")).toBeInTheDocument());
-  expect(screen.getByText(/補上班卡申請/)).toBeInTheDocument();
-  expect(screen.getByText(/請假申請（事假）/)).toBeInTheDocument();
+  // 補打卡與請假的日期／時間／狀態格式要統一成同一套「MM/DD HH:mm(~HH:mm)　類型申請」節奏。
+  expect(screen.getByText(/^08\/20 09:03.*補上班卡申請$/)).toBeInTheDocument();
+  expect(screen.getByText(/^08\/21 09:00 ~ 18:00.*請假申請（事假）$/)).toBeInTheDocument();
+});
+
+test("本月異常日中還有未處理的顯示提示行；全部都已申請時不顯示", async () => {
+  mockGetMyRecords.mockResolvedValue({ records: [EARLY_LEAVE_DAY] });
+  renderWithRouter({ punchDate: "2026-08-24" });
+
+  await waitFor(() => expect(screen.getByText("本月有 1 天異常未處理。")).toBeInTheDocument());
+});
+
+test("異常日皆已有待審申請時不顯示未處理提示行", async () => {
+  mockGetMyRecords.mockResolvedValue({ records: [EARLY_LEAVE_DAY] });
+  mockGetMyPunchRequests.mockResolvedValue({
+    requests: [{
+      id: 1, target_date: "2026-08-20", type: "in", status: "pending",
+      requested_in_time: "2026-08-20T01:03:00+00:00", created_at: "2026-08-20T01:00:00+00:00",
+    }],
+  });
+  renderWithRouter({ punchDate: "2026-08-24" });
+
+  await waitFor(() => expect(screen.getByText("已申請，待審核")).toBeInTheDocument());
+  expect(screen.queryByText(/天異常未處理/)).not.toBeInTheDocument();
 });

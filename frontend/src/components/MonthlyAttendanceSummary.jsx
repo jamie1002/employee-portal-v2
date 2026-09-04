@@ -28,13 +28,24 @@ function hasPendingRequestForDate(date, punchRequests, leaveRequests) {
   });
 }
 
+// 補打卡申請的日期／時間／狀態文字格式統一成「MM/DD HH:mm　類型申請」（both
+// 類型顯示上下班時間區間），與請假／加班的「MM/DD HH:mm ~ HH:mm　類型申請」
+// 同一套視覺節奏，不要日期沒有時間、時間又沒有日期地兜出兩種不同格式。
+function punchRequestDetail(r) {
+  const label = `${PUNCH_TYPE_LABEL[r.type] ?? "補打卡"}申請`;
+  if (r.type === "both") {
+    return `${formatDateTime(r.requested_in_time)} ~ ${formatTime(r.requested_out_time)}　${label}`;
+  }
+  return `${formatDateTime(r.requested_in_time ?? r.requested_out_time)}　${label}`;
+}
+
 function buildPendingItems(punchRequests, leaveRequests, overtimeRequests) {
   const items = [
     ...punchRequests
       .filter((r) => r.status === "pending")
       .map((r) => ({
         key: `punch-${r.id}`,
-        detail: `${r.target_date}　${PUNCH_TYPE_LABEL[r.type] ?? "補打卡"}申請`,
+        detail: punchRequestDetail(r),
         submittedAt: r.created_at,
       })),
     ...leaveRequests
@@ -107,10 +118,17 @@ export default function MonthlyAttendanceSummary({ punchDate, refreshKey }) {
   }, [punchDate, refreshKey]);
 
   const pendingItems = buildPendingItems(punchRequests, leaveRequests, overtimeRequests);
+  const unhandledCount = records.filter(
+    (record) => !hasPendingRequestForDate(record.punch_date, punchRequests, leaveRequests),
+  ).length;
 
   return (
     <div className="glass-panel rounded-xl p-6">
       <h3 className="text-lg font-medium text-text-primary">本月出勤總覽</h3>
+
+      {!isLoading && unhandledCount > 0 && (
+        <p className="mt-1 text-sm text-status-danger">本月有 {unhandledCount} 天異常未處理。</p>
+      )}
 
       {isLoading && <p className="mt-3 text-sm text-text-secondary">載入中…</p>}
 
