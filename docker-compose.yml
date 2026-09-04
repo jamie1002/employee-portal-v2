@@ -1,0 +1,42 @@
+services:
+  postgres-dev:
+    image: postgres:16
+    container_name: employee-portal-v2-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: employee_portal
+    ports:
+      # 舊專案（employee-portal）的 docker-compose 仍佔用主機 5432/5433，
+      # 這裡改用 5442/5443 避免衝突，兩個專案可同時開著互相對照。
+      - "5442:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-test:
+    image: postgres:16
+    container_name: employee-portal-v2-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: employee_portal_test
+    ports:
+      - "5443:5432"
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-dev-data:
+  postgres-test-data:

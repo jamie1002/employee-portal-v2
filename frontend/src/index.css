@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* 設計 token（見 docs/UI-SPEC.md §1.1）。Tailwind v4 是 CSS-first，
+   不建立 tailwind.config.js —— 那會被 v4 靜默忽略。 */
+@theme {
+  /* 底板階層（由深到淺） */
+  --color-surface-950: #09090b;
+  --color-surface-900: #111114;
+  --color-surface-800: #18181c;
+  --color-surface-700: #26262b;
+  --color-surface-600: #35353b;
+
+  /* 邊框 */
+  --color-border-subtle: #2a2a30;
+  --color-border-strong: #3d3d45;
+
+  /* 文字 */
+  --color-text-primary: #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #6b6b74;
+
+  /* 強調色：Neon Cyan */
+  --color-accent-400: #22d3ee;
+  --color-accent-500: #06b6d4;
+  --color-accent-600: #0891b2;
+
+  /* 語意色 */
+  --color-status-normal: #34d399;
+  --color-status-late: #fbbf24;
+  --color-status-danger: #f87171;
+
+  --font-sans: "Inter", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+}
+
+body {
+  background-color: var(--color-surface-950);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+.glass-panel {
+  background-color: color-mix(in srgb, var(--color-surface-800) 70%, transparent);
+  border: 1px solid var(--color-border-subtle);
+  backdrop-filter: blur(12px);
+}
+
+/* 原生日期／時間圖示在深色底上幾乎不可見，全域反轉圖示顏色。
+   不要對個別輸入框再套 [color-scheme:dark]——兩者疊加會再翻轉回黑色
+   （見 docs/PITFALLS.md D5）。 */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}

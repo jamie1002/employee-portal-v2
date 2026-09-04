@@ -1,0 +1,32 @@
+# 環境變數
+.env
+.env.local
+frontend/.env
+frontend/.env.local
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Python
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/*.egg-info/
+backend/venv/
+backend/.venv/
+*.pyc
+
+# 測試與建置產物
+coverage/
+frontend/coverage/
+test-results/
+playwright-report/
+e2e/.auth/
+
+# 編輯器與作業系統
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
