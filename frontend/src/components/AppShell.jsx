@@ -17,6 +17,7 @@ export const NAV_ITEMS = [
   { to: "/leave-balance", label: "假別", roles: ["admin", "manager", "employee"] },
   { to: "/requests", label: "我的申請", roles: ["admin", "manager", "employee"] },
   { to: "/approvals", label: "審核中心", roles: ["admin", "manager"] },
+  { to: "/venue", label: "場地借用", roles: ["admin", "manager", "employee"] },
 ];
 
 export default function AppShell() {

@@ -18,6 +18,8 @@ from app.routers import (
     leave_request,
     overtime_request,
     punch_request,
+    room,
+    room_booking,
     users,
 )
 
@@ -52,3 +54,5 @@ app.include_router(punch_request.router, prefix="/api")
 app.include_router(leave_request.router, prefix="/api")
 app.include_router(overtime_request.router, prefix="/api")
 app.include_router(leave_quota.router, prefix="/api")
+app.include_router(room.router, prefix="/api")
+app.include_router(room_booking.router, prefix="/api")
