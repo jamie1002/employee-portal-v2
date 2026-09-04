@@ -1,0 +1,107 @@
+schema: spec-driven
+
+context: |
+  # Employee Portal — 企業員工管理與出勤系統
+
+  完整規格見專案根目錄 `SPEC.md`；介面規格見 `docs/UI-SPEC.md`；
+  **實作前必讀 `docs/PITFALLS.md`**（前一版實測踩過的坑，規格上看不出來）。
+  重建批次與驗收條件見 `docs/REBUILD-TASKS.md`。
+
+  ## 語言
+  所有文件、程式碼註解、commit message、以及程式輸出的訊息（log / API 錯誤訊息）
+  一律使用**繁體中文（台灣用語）**。技術專有名詞保留英文。嚴禁簡體中文。
+
+  ## 技術棧（版本已鎖定，不得自行升級或降級）
+  - 後端：Python 3.12 + fastapi==0.115.6 + uvicorn[standard]==0.34.0 + asyncpg==0.30.0
+          + pydantic==2.10.4 + pydantic-settings==2.7.1 + bcrypt==4.2.1 + PyJWT==2.10.1
+          + aiosmtplib==3.0.2 + structlog==24.4.0 + APScheduler==3.11.0 + openpyxl==3.1.5
+  - 前端：react@19.2.8 + react-router-dom@7.18.2 + vite@8.2.2 + tailwindcss@4.3.3
+          + @tailwindcss/vite@4.3.3 + lucide-react@1.33.0 + axios + date-fns@4.4.0
+  - 資料庫：PostgreSQL 16（本機 Docker / 正式環境 Neon.tech）
+  - 測試：pytest==8.3.4 + pytest-asyncio==0.25.1 + pytest-timeout==2.3.1 + httpx==0.28.1
+          + vitest@4.1.11 + @testing-library/react@16.3.2 + @playwright/test@1.62.1
+
+  ## 三個版本陷阱（違反會浪費大量時間）
+  1. **Tailwind v4 是 CSS-first**：沒有 tailwind.config.js。用 @tailwindcss/vite plugin，
+     CSS 內寫 `@import "tailwindcss";` 與 `@theme { --color-*: ... }`。
+     任何 v3 的 config 寫法都會**靜默失效**（不報錯、樣式不生效）。
+  2. **React Router v7** 的 API 與 v6 有差異，不要套用 v6 的寫法。
+  3. **asyncpg 的型別邊界**：DATE / TIME / TIMESTAMPTZ 欄位的查詢參數必須是原生 Python
+     物件（datetime.date / time / datetime），傳字串會拋型別錯誤。一律走 app/utils/pg_types.py。
+
+  ## 專案結構（npm workspaces monorepo）
+  ```
+  backend/app/{routers,services,repositories,schemas,middleware,utils,config,jobs,db_scripts}/
+  frontend/src/{pages,components,hooks,api,context,utils}/
+  db/{migrations,seed}/   e2e/   docs/   openspec/
+  docker-compose.yml      package.json（root，統一指令入口）
+  ```
+
+  ## 後端分層慣例
+  routers/（HTTP 層，只解析請求、掛權限 dependency、回傳）
+  → services/（業務邏輯與交易邊界）→ repositories/（手寫 SQL，不做授權判斷）
+  - 所有 SQL 一律參數化查詢 `$1, $2`，嚴禁字串拼接。
+  - 錯誤統一由 `AppError(status_code, message, code)` 拋出，交由 error middleware 轉譯。
+  - PostgreSQL 錯誤碼須明確轉譯：`23505`（unique）→ 409、`23P01`（exclusion）→ 409、
+    `23503`（foreign key）→ 400。**任何預期內的衝突都不得外洩成 500**。
+  - 純函式（工時計算、時數計算）獨立於 I/O，可單獨單元測試。
+
+  ## 時區與時間規範（最容易出錯的地方）
+  - 存 UTC（TIMESTAMPTZ）、算用台北、顯示用台北。時區字串集中於環境變數 `APP_TIMEZONE`。
+  - `attendances.punch_date` 必須以台北時區推導，不可用 UTC 日期 —— 否則台灣早上 8 點的
+    打卡會記到前一天，並沿著 UNIQUE(user_id, punch_date) 污染補打卡的目標列。
+  - **所有業務時間戳一律取自 `get_virtual_now()`（展示用虛擬時鐘）**，禁止 `datetime.now()`、
+    SQL 的 `now()` 或資料庫觸發器。唯一例外：展示資料閒置自動重置的計時器用真實時間
+    （虛擬時間到達 clamp 上限後不再前進，用它會讓重置永遠不觸發）。
+  - **所有時間規則的比較一律先截斷到分鐘**，在純函式入口就截斷，不依賴呼叫端。
+
+  ## 考勤規則
+  - **禁止寫死時間字面值**（09:00、18:00、12:00、13:00、10、8），一律讀 system_settings。
+    驗收方式：把設定改成 08:30–17:30 / 緩衝 15 分 / 午休 12:30–13:30，所有規則要整體平移。
+  - 例外（法規／產品常數，須具名並註解說明為何不是設定值）：加班前休息 30 分鐘、
+    加班時數 30 分鐘捨去單位、晚下班提示門檻 1 小時。
+
+  ## 認證與授權
+  - JWT + Bearer Token（前端存 localStorage）。不使用 HTTP-only Cookie（前後端不同網域）。
+  - **role、department_id、permissions 一律每個請求回資料庫重查**，token payload 內的值
+    不被信任。權限絕不寫進 JWT，否則收回不會即時生效。
+  - 前端的 RoleGate 與選單過濾只是 UX，不是安全邊界；每支端點都必須自己掛權限 dependency。
+  - 範圍限縮一律 deny-by-default：寫「不是 admin 就限縮」，不要寫「是 manager 才限縮」。
+
+  ## 測試規範
+  - 後端整合測試打**真實 Postgres**（測試容器 port 5433，DB 名 employee_portal_test），
+    **禁止 mock 資料庫**：本專案風險集中在 SQL 行為本身（UNIQUE 衝突、UPSERT 覆蓋語意、
+    排除約束、時區轉換），mock 掉等於把要測的東西測掉了。
+  - 測試 helper 在套用 migration 前自行 DROP SCHEMA 重建，執行前必須驗證資料庫名稱以
+    `_test` 結尾。跑測試不得需要任何人工前置步驟。
+  - 前端元件測試**可以** mock API 層（測的是元件邏輯，不是 SQL 正確性）。
+  - e2e 的日期一律以虛擬時鐘的固定錨點推算，**禁止使用 `new Date()`**。
+  - 每個 change 的 tasks 必須包含對應測試，且測試全綠才算完成。
+
+  ## 統一指令入口（root package.json）
+  npm run dev / db:migrate / db:seed / db:reset / test / test:backend / test:frontend / test:e2e
+
+rules:
+  proposal:
+    - 以繁體中文撰寫
+    - Why 段落必須連結回 SPEC.md 的對應章節編號
+    - Impact 段落必須列出實際會新增或修改的檔案路徑
+    - 若該批次有對應的 docs/PITFALLS.md 章節，必須在 Why 或 Impact 中明確引用
+  specs:
+    - 以繁體中文撰寫 requirement 與 scenario 名稱及內容
+    - 每個 Requirement 的內文**必須包含字面的 `SHALL` 或 `MUST`**（驗證器強制檢查，中文「必須」不算）。
+      建議句式：「系統 SHALL 提供 ...」、「後端 SHALL 於 ... 時回應 409」
+    - 每個 Requirement 至少一個 Scenario；牽涉錯誤處理者必須同時有成功與失敗的 Scenario
+    - Scenario 中若涉及 HTTP 回應，必須明確寫出狀態碼
+    - 邊界條件（時間邊界、區間重疊、權限交界）必須獨立成 Scenario，不可與正常路徑合併
+    - 涉及畫面的 capability，響應式行為必須獨立成 Scenario 並明確寫出斷點寬度
+  design:
+    - 以繁體中文撰寫
+    - Decisions 段落每一項都必須寫出「為何不選另一個方案」
+    - 涉及並行、時區、SQL 語意、權限邊界的決策必須說明失敗情境
+      （不只說怎麼做，要說不這樣做會壞在哪）
+  tasks:
+    - 以繁體中文撰寫
+    - 每個任務必須小到能在單次操作內完成，並可獨立驗證
+    - 每個功能任務群組後面必須緊跟對應的測試任務群組
+    - 最後一個任務群組固定為「驗收」，列出可直接複製執行的驗證指令
