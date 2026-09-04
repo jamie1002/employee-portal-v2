@@ -25,6 +25,7 @@ export const NAV_ITEMS = [
   { to: "/employees", label: "員工資訊", roles: ["admin", "manager", "employee"] },
   { to: "/departments", label: "部門管理", roles: ["admin"] },
   { to: "/holidays", label: "國定假日", roles: ["admin"], permissions: ["holidays.manage"] },
+  { to: "/admin/attendance", label: "全公司出勤", roles: ["admin"] },
   { to: "/settings", label: "考勤設定", roles: ["admin"], permissions: ["settings.manage"] },
   { to: "/schema", label: "資料庫管理", roles: ["admin"] },
   { to: "/exports", label: "匯出報表", roles: ["admin", "manager"], permissions: ["exports.run"] },

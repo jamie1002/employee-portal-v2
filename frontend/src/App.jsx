@@ -6,6 +6,7 @@ import ChangePasswordPage from "./pages/ChangePasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import LeaveBalancePage from "./pages/LeaveBalancePage";
 import LoginPage from "./pages/LoginPage";
+import CompanyAttendancePage from "./pages/admin/CompanyAttendancePage";
 import DepartmentPage from "./pages/admin/DepartmentPage";
 import EmployeePage from "./pages/admin/EmployeePage";
 import ExportPage from "./pages/admin/ExportPage";
@@ -30,6 +31,7 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
+          <Route path="/admin/attendance" element={<CompanyAttendancePage />} />
           <Route path="/leave-balance" element={<LeaveBalancePage />} />
           <Route path="/requests" element={<MyRequestsPage />} />
           <Route path="/requests/punch/new" element={<PunchRequestPage />} />

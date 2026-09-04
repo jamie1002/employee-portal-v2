@@ -63,8 +63,9 @@ test("出勤紀錄頁可依狀態篩選", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "出勤紀錄" })).toBeVisible();
 
-  await page.getByLabel("狀態").selectOption("early_leave");
+  await page.getByLabel("狀態").selectOption("holiday_work");
 
-  // 管理者帳號沒有早退紀錄，篩選後應該是空狀態而不是照舊列出全部。
+  // holiday_work 只會出現在非工作日打卡，種子資料（近兩週劇本＋歷史回填）一律只
+  // 產生工作日的出勤紀錄，任何帳號篩這個狀態都應該是空狀態，不是照舊列出全部。
   await expect(page.getByText("尚無出勤紀錄。")).toBeVisible();
 });

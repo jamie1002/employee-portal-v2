@@ -21,6 +21,7 @@ from datetime import date, time, timedelta
 import asyncpg
 
 from app.config.settings import app_settings
+from app.db_scripts.backfill_history import run_backfill
 from app.repositories import (
     attendance_repository,
     leave_request_repository,
@@ -199,3 +200,9 @@ async def seed_business_data(conn: asyncpg.Connection) -> None:
     await room_booking_repository.create(
         conn, OTHER_MANAGER_ID, 2, "業務部晨會", _at(date(2026, 8, 27), "09:30"), _at(date(2026, 8, 27), "10:30"),
     )
+
+    # ---- 歷史出勤回填（2026-05-01 ~ 2026-08-23）：讓出勤紀錄／全公司出勤有半年份
+    # 資料可展示，不是只有上面幾筆近兩週劇本。必須排在最後——回填用
+    # ON CONFLICT DO NOTHING，不能覆蓋掉上面已經手動寫好的劇本式資料
+    # （見 backfill_history.py 模組說明）。----
+    await run_backfill(conn, settings)
