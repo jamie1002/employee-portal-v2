@@ -4,7 +4,13 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import AttendancePage from "./pages/AttendancePage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
 import DashboardPage from "./pages/DashboardPage";
+import LeaveBalancePage from "./pages/LeaveBalancePage";
 import LoginPage from "./pages/LoginPage";
+import LeaveRequestPage from "./pages/requests/LeaveRequestPage";
+import MyRequestsPage from "./pages/requests/MyRequestsPage";
+import OvertimeRequestPage from "./pages/requests/OvertimeRequestPage";
+import PunchRequestPage from "./pages/requests/PunchRequestPage";
+import ReviewCenterPage from "./pages/review/ReviewCenterPage";
 
 export default function App() {
   return (
@@ -17,6 +23,12 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
+          <Route path="/leave-balance" element={<LeaveBalancePage />} />
+          <Route path="/requests" element={<MyRequestsPage />} />
+          <Route path="/requests/punch/new" element={<PunchRequestPage />} />
+          <Route path="/requests/leave/new" element={<LeaveRequestPage />} />
+          <Route path="/requests/overtime/new" element={<OvertimeRequestPage />} />
+          <Route path="/approvals" element={<ReviewCenterPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

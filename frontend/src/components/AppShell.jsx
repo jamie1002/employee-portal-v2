@@ -14,6 +14,9 @@ const ROLE_LABEL = {
 export const NAV_ITEMS = [
   { to: "/dashboard", label: "首頁", roles: ["admin", "manager", "employee"] },
   { to: "/attendance", label: "出勤紀錄", roles: ["admin", "manager", "employee"] },
+  { to: "/leave-balance", label: "假別", roles: ["admin", "manager", "employee"] },
+  { to: "/requests", label: "我的申請", roles: ["admin", "manager", "employee"] },
+  { to: "/approvals", label: "審核中心", roles: ["admin", "manager"] },
 ];
 
 export default function AppShell() {

@@ -10,7 +10,16 @@ from app.config.settings import app_settings
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.security_headers import SecurityHeadersMiddleware
-from app.routers import attendance, auth, health, users
+from app.routers import (
+    attendance,
+    auth,
+    health,
+    leave_quota,
+    leave_request,
+    overtime_request,
+    punch_request,
+    users,
+)
 
 
 @asynccontextmanager
@@ -39,3 +48,7 @@ app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(attendance.router, prefix="/api")
+app.include_router(punch_request.router, prefix="/api")
+app.include_router(leave_request.router, prefix="/api")
+app.include_router(overtime_request.router, prefix="/api")
+app.include_router(leave_quota.router, prefix="/api")

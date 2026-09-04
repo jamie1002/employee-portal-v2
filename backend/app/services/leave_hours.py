@@ -71,6 +71,43 @@ def calculate_leave_hours_by_day(
     return by_day
 
 
+def calculate_leave_hours(
+    start_time: datetime,
+    end_time: datetime,
+    settings: WorkSettings,
+    tz: str,
+    holiday_dates: set[date] | None = None,
+) -> float:
+    """calculate_leave_hours_by_day() 的原始逐日時數加總後，只在最終總和四捨五入一次
+    （見上方模組說明：逐日先各自進位再加總會累積誤差）。"""
+    by_day = calculate_leave_hours_by_day(start_time, end_time, settings, tz, holiday_dates)
+    return round(sum(by_day.values()) * 100) / 100
+
+
+def calculate_overtime_hours(start_time: datetime, end_time: datetime, settings: WorkSettings, tz: str) -> float:
+    """加班時數＝區間長度扣除與表定午休重疊的部分後，以 30 分鐘為單位無條件捨去。
+
+    午休固定不浮動——加班沒有「到班時間」可據以浮動，也刻意不排除週末（假日出勤
+    本來就是加班的主要來源），與請假時數計算規則各自獨立、不共用。
+    """
+    total = end_time - start_time
+
+    cursor = _local_date(start_time, tz)
+    last_day = _local_date(end_time, tz)
+    while cursor <= last_day:
+        lunch_start = at(cursor, settings.lunch_start, tz)
+        lunch_end = at(cursor, settings.lunch_end, tz)
+        overlap_start = max(start_time, lunch_start)
+        overlap_end = min(end_time, lunch_end)
+        if overlap_end > overlap_start:
+            total -= overlap_end - overlap_start
+        cursor += timedelta(days=1)
+
+    minutes = total.total_seconds() / 60
+    half_hour_units = int(minutes // 30)
+    return half_hour_units / 2
+
+
 def compute_leave_hours_for_date(
     punch_date: date,
     leave_intervals,

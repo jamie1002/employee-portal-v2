@@ -1,3 +1,4 @@
+import LeaveQuotaSummary from "../components/LeaveQuotaSummary";
 import MonthlyAttendanceSummary from "../components/MonthlyAttendanceSummary";
 import PunchPanel from "../components/PunchPanel";
 import { useAuth } from "../context/AuthContext";
@@ -30,6 +31,8 @@ export default function DashboardPage() {
         punchDate={today?.punch_date}
         refreshKey={`${today?.has_punched_in}-${today?.has_punched_out}`}
       />
+
+      <LeaveQuotaSummary />
     </div>
   );
 }

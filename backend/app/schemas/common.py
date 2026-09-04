@@ -5,7 +5,7 @@ TIMESTAMPTZ 參數要求原生型別，在驗證這一層就轉好，後面每�
 （見 docs/PITFALLS.md A5）。
 """
 
-from datetime import date
+from datetime import date, datetime
 
 from app.utils.errors import AppError
 
@@ -50,6 +50,35 @@ def parse_int_in_range(raw, key: str, default: int, minimum: int, maximum: int) 
     if value < minimum or value > maximum:
         raise validation_error(f"{key} 必須介於 {minimum} 到 {maximum} 之間")
     return value
+
+
+def require_str(data: dict, key: str, message: str) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise validation_error(message)
+    return value.strip()
+
+
+def parse_datetime_field(data: dict, key: str) -> datetime:
+    """一律要求帶時區資訊的 ISO 字串（前端固定送 `+08:00`），拒絕 naive 字串——
+    否則後續與其他一律帶時區的 datetime 比較會直接拋型別錯誤。"""
+    raw = data.get(key)
+    if not isinstance(raw, str) or not raw:
+        raise validation_error(f"{key} 為必填")
+    try:
+        value = datetime.fromisoformat(raw)
+    except ValueError:
+        raise validation_error(f"{key} 格式不正確") from None
+    if value.tzinfo is None:
+        raise validation_error(f"{key} 必須包含時區資訊")
+    return value
+
+
+def parse_optional_datetime_field(data: dict, key: str) -> datetime | None:
+    raw = data.get(key)
+    if raw is None or raw == "":
+        return None
+    return parse_datetime_field(data, key)
 
 
 def _to_date(raw, key: str) -> date:
