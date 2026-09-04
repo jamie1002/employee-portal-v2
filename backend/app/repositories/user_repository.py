@@ -1,6 +1,10 @@
 """users 表的資料存取。不做授權判斷（範圍限縮是 service 的責任）。"""
 
+from datetime import date
+
 import asyncpg
+
+from app.utils.pg_types import pg_date
 
 
 async def find_by_email(pool: asyncpg.Pool, email: str) -> asyncpg.Record | None:
@@ -98,3 +102,69 @@ async def find_role_by_id(pool: asyncpg.Pool, user_id: int) -> str | None:
 
 async def update_password(pool: asyncpg.Pool, user_id: int, password_hash: str) -> None:
     await pool.execute("UPDATE users SET password_hash = $1 WHERE id = $2", password_hash, user_id)
+
+
+async def count_by_role(pool: asyncpg.Pool, role: str) -> int:
+    return await pool.fetchval("SELECT count(*) FROM users WHERE role = $1", role)
+
+
+async def create(
+    pool: asyncpg.Pool,
+    name: str,
+    email: str,
+    password_hash: str,
+    role: str,
+    department_id: int | None,
+    employee_no_year: int,
+) -> int:
+    """員工編號在同一個 INSERT 內用序列產生（`EMP{年}{3碼}`），不接受前端傳入、
+    也不拆成「先查序列再組字串」兩步，避免併發建立時序號被搶走造成缺號或衝突。"""
+    return await pool.fetchval(
+        """
+        INSERT INTO users (name, email, password_hash, role, department_id, employee_no)
+        VALUES ($1, $2, $3, $4, $5, 'EMP' || $6::text || lpad(nextval('employee_no_seq')::text, 3, '0'))
+        RETURNING id
+        """,
+        name,
+        email,
+        password_hash,
+        role,
+        department_id,
+        str(employee_no_year),
+    )
+
+
+async def update(
+    pool: asyncpg.Pool,
+    user_id: int,
+    name: str,
+    email: str,
+    role: str,
+    department_id: int | None,
+    extension_number: str | None,
+    hire_date: date | None,
+) -> bool:
+    """`extension_number`／`hire_date` 未傳入時（None）用 COALESCE 保留原值，
+    不得直接覆蓋成 NULL（見 docs/PITFALLS.md A2）。"""
+    result = await pool.execute(
+        """
+        UPDATE users
+        SET name = $2, email = $3, role = $4, department_id = $5,
+            extension_number = COALESCE($6, extension_number),
+            hire_date = COALESCE($7, hire_date)
+        WHERE id = $1
+        """,
+        user_id,
+        name,
+        email,
+        role,
+        department_id,
+        extension_number,
+        pg_date(hire_date) if hire_date is not None else None,
+    )
+    return result != "UPDATE 0"
+
+
+async def delete_by_id(pool: asyncpg.Pool, user_id: int) -> bool:
+    result = await pool.execute("DELETE FROM users WHERE id = $1", user_id)
+    return result != "DELETE 0"

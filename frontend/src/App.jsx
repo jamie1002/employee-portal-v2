@@ -6,6 +6,11 @@ import ChangePasswordPage from "./pages/ChangePasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import LeaveBalancePage from "./pages/LeaveBalancePage";
 import LoginPage from "./pages/LoginPage";
+import DepartmentPage from "./pages/admin/DepartmentPage";
+import EmployeePage from "./pages/admin/EmployeePage";
+import HolidayManagementPage from "./pages/admin/HolidayManagementPage";
+import SchemaPage from "./pages/admin/SchemaPage";
+import SettingsPage from "./pages/admin/SettingsPage";
 import LeaveRequestPage from "./pages/requests/LeaveRequestPage";
 import MyRequestsPage from "./pages/requests/MyRequestsPage";
 import OvertimeRequestPage from "./pages/requests/OvertimeRequestPage";
@@ -31,6 +36,11 @@ export default function App() {
           <Route path="/requests/overtime/new" element={<OvertimeRequestPage />} />
           <Route path="/approvals" element={<ReviewCenterPage />} />
           <Route path="/venue" element={<VenueBookingPage />} />
+          <Route path="/employees" element={<EmployeePage />} />
+          <Route path="/departments" element={<DepartmentPage />} />
+          <Route path="/holidays" element={<HolidayManagementPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/schema" element={<SchemaPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

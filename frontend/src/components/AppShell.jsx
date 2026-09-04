@@ -18,6 +18,11 @@ export const NAV_ITEMS = [
   { to: "/requests", label: "我的申請", roles: ["admin", "manager", "employee"] },
   { to: "/approvals", label: "審核中心", roles: ["admin", "manager"] },
   { to: "/venue", label: "場地借用", roles: ["admin", "manager", "employee"] },
+  { to: "/employees", label: "員工資訊", roles: ["admin", "manager", "employee"] },
+  { to: "/departments", label: "部門管理", roles: ["admin"] },
+  { to: "/holidays", label: "國定假日", roles: ["admin"], permissions: ["holidays.manage"] },
+  { to: "/settings", label: "考勤設定", roles: ["admin"], permissions: ["settings.manage"] },
+  { to: "/schema", label: "資料庫管理", roles: ["admin"] },
 ];
 
 export default function AppShell() {

@@ -26,6 +26,17 @@ export function formatDateTime(isoString, { withYear = false } = {}) {
   });
 }
 
+// 授權紀錄的「由 X 於 M/D 授予」只需要月/日，不需要完整日期時間。
+export function formatMonthDay(isoString) {
+  if (!isoString) return "—";
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: TIMEZONE, month: "numeric", day: "numeric" }).formatToParts(
+    new Date(isoString),
+  );
+  const month = parts.find((p) => p.type === "month").value;
+  const day = parts.find((p) => p.type === "day").value;
+  return `${month}/${day}`;
+}
+
 export function taipeiDateKey(isoString) {
   return new Date(isoString).toLocaleDateString("en-CA", { timeZone: TIMEZONE });
 }

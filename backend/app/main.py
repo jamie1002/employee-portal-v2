@@ -11,15 +11,19 @@ from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.middleware.error_handler import register_error_handlers
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.routers import (
+    admin_schema,
     attendance,
     auth,
+    departments,
     health,
+    holidays,
     leave_quota,
     leave_request,
     overtime_request,
     punch_request,
     room,
     room_booking,
+    settings,
     users,
 )
 
@@ -56,3 +60,7 @@ app.include_router(overtime_request.router, prefix="/api")
 app.include_router(leave_quota.router, prefix="/api")
 app.include_router(room.router, prefix="/api")
 app.include_router(room_booking.router, prefix="/api")
+app.include_router(departments.router, prefix="/api")
+app.include_router(holidays.router, prefix="/api")
+app.include_router(settings.router, prefix="/api")
+app.include_router(admin_schema.router, prefix="/api")
