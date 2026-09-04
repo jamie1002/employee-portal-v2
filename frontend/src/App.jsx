@@ -1,34 +1,29 @@
-import { useEffect, useState } from "react";
-import { getHealth } from "./api/health.api";
+import { Navigate, Route, Routes } from "react-router-dom";
+import ProtectedRoute from "./components/ProtectedRoute";
+import ChangePasswordPage from "./pages/ChangePasswordPage";
+import LoginPage from "./pages/LoginPage";
 
-// 骨架階段的暫時畫面：驗證前後端連線與 design token 是否生效。
-// 批 1 會換成真正的路由（AuthContext / ProtectedRoute）。
-export default function App() {
-  const [health, setHealth] = useState(null);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    getHealth()
-      .then(setHealth)
-      .catch(() => setError("無法連線到後端 API"));
-  }, []);
-
+// 批 2 起會把這個佔位頁換成真正的 AppShell + 首頁，這裡只證明
+// 認證骨架（登入 → 導頁 → 受保護路由）跑得通。
+function PlaceholderHome() {
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="glass-panel w-full max-w-sm rounded-xl p-6">
-        <h1 className="text-lg font-medium text-text-primary">員工入口網站</h1>
-        <p className="mt-1 text-sm text-text-secondary">專案骨架建置中</p>
-
-        <div className="mt-4 rounded-lg border border-border-subtle bg-surface-900 p-3 text-sm">
-          {error && <span className="text-status-danger">{error}</span>}
-          {!error && !health && <span className="text-text-muted">檢查後端連線中…</span>}
-          {health && (
-            <span className="text-accent-400">
-              API 狀態：{health.status}／資料庫：{health.database}
-            </span>
-          )}
-        </div>
+      <div className="glass-panel rounded-xl p-6 text-text-secondary">
+        登入成功。首頁與版面骨架將於後續批次建置。
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedRoute />}>
+        <Route path="/change-password" element={<ChangePasswordPage />} />
+        <Route path="/" element={<PlaceholderHome />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

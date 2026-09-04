@@ -46,6 +46,13 @@ SELECT setval('departments_id_seq', 3, true);
 SELECT setval('users_id_seq', 6, true);
 
 -- ------------------------------------------------------------
+-- 細粒度權限下放示範：李小芳（一般員工）被 admin 授予國定假日管理權限，
+-- 讓「額外權限」欄與 hasAccess() 有非空資料可展示。
+-- ------------------------------------------------------------
+INSERT INTO user_permissions (user_id, permission, granted_by, granted_at) VALUES
+    (6, 'holidays.manage', 1, '2026-08-20 10:00:00+08');
+
+-- ------------------------------------------------------------
 -- 場地
 -- ------------------------------------------------------------
 INSERT INTO rooms (id, name, capacity, location_info) VALUES

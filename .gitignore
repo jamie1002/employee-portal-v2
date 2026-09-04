@@ -30,3 +30,6 @@ e2e/.auth/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude Code 本機個人設定（機器別的權限白名單），launch.json 是專案共用設定要留著
+.claude/settings.local.json
