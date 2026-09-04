@@ -1,4 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
+import DemoClockControl from "./DemoClockControl";
+import DemoResetButton from "./DemoResetButton";
+import RoleGate from "./RoleGate";
 import { useAuth } from "../context/AuthContext";
 import { hasAccess } from "../utils/hasAccess";
 
@@ -56,18 +59,25 @@ export default function AppShell() {
       </aside>
 
       <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-end gap-3 border-b border-border-subtle bg-surface-900 px-6 py-3">
-          <span className="text-sm text-text-primary">{user.name}</span>
-          <span className="rounded-full border border-accent-500 px-2 py-0.5 text-xs text-accent-400">
-            {ROLE_LABEL[user.role]}
-          </span>
-          <button
-            type="button"
-            onClick={logout}
-            className="text-sm text-text-secondary hover:text-status-danger"
-          >
-            登出
-          </button>
+        <header className="flex items-center justify-between gap-3 border-b border-border-subtle bg-surface-900 px-6 py-3">
+          <DemoClockControl />
+
+          <div className="flex items-center gap-3">
+            <RoleGate roles={["admin"]}>
+              <DemoResetButton />
+            </RoleGate>
+            <span className="text-sm text-text-primary">{user.name}</span>
+            <span className="rounded-full border border-accent-500 px-2 py-0.5 text-xs text-accent-400">
+              {ROLE_LABEL[user.role]}
+            </span>
+            <button
+              type="button"
+              onClick={logout}
+              className="text-sm text-text-secondary hover:text-status-danger"
+            >
+              登出
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 p-6">

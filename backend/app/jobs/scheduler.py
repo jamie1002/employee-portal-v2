@@ -10,6 +10,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.jobs.absent_auto_mark import CHECK_INTERVAL_SECONDS, run_absent_auto_mark_job
+from app.jobs.demo_auto_reset import CHECK_INTERVAL_SECONDS as DEMO_RESET_CHECK_INTERVAL_SECONDS
+from app.jobs.demo_auto_reset import check_idle_and_reset_job
 
 _scheduler: AsyncIOScheduler | None = None
 
@@ -33,6 +35,14 @@ def start_scheduler() -> AsyncIOScheduler:
         id="absent_auto_mark",
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc),
+    )
+    # 閒置檢查不需要「啟動後立刻跑一次」——剛啟動就觸發重置沒有意義，讓它照
+    # 正常的間隔排程即可。
+    _scheduler.add_job(
+        check_idle_and_reset_job,
+        trigger=IntervalTrigger(seconds=DEMO_RESET_CHECK_INTERVAL_SECONDS),
+        id="demo_idle_auto_reset",
+        replace_existing=True,
     )
     _scheduler.start()
     return _scheduler

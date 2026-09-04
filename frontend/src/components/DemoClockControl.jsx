@@ -1,0 +1,62 @@
+import { useState } from "react";
+import { setDemoClock } from "../api/demo.api";
+import { useVirtualClock } from "../hooks/useVirtualClock";
+
+const MIN_DATETIME = "2026-08-24T00:00";
+const MAX_DATETIME = "2026-08-31T23:59";
+const TAIPEI_OFFSET = "+08:00";
+
+function formatDisplay(date) {
+  if (!date) return "—";
+  return new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+export default function DemoClockControl() {
+  const virtualNow = useVirtualClock();
+  const [draft, setDraft] = useState("");
+  const [isApplying, setIsApplying] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleApply() {
+    if (!draft) return;
+    setIsApplying(true);
+    setError("");
+    try {
+      await setDemoClock(`${draft}:00${TAIPEI_OFFSET}`);
+      // 套用新時間後整頁重新載入：畫面上大多數元件只在掛載時抓資料，
+      // 局部更新沒辦法反映「現在是另一天」帶來的一連串連鎖狀態變化。
+      window.location.reload();
+    } catch (err) {
+      setError(err.response?.data?.error?.message ?? "調整失敗，請稍後再試。");
+      setIsApplying(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-sm text-text-secondary">
+      <span>展示時間：{formatDisplay(virtualNow)}</span>
+      <input
+        type="datetime-local"
+        aria-label="調整展示時間"
+        min={MIN_DATETIME}
+        max={MAX_DATETIME}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        className="rounded-lg border border-border-subtle bg-surface-900 px-2 py-1 text-xs text-text-primary focus:border-accent-500 focus:outline-none"
+      />
+      <button
+        type="button"
+        disabled={!draft || isApplying}
+        onClick={handleApply}
+        className="rounded-lg border border-accent-500 px-2 py-1 text-xs text-accent-400 hover:bg-surface-800 disabled:opacity-50"
+      >
+        {isApplying ? "套用中…" : "套用"}
+      </button>
+      {error && <span className="text-xs text-status-danger">{error}</span>}
+    </div>
+  );
+}

@@ -14,15 +14,15 @@ from zoneinfo import ZoneInfo
 from app.config.database import get_pool
 
 _TZ = ZoneInfo("Asia/Taipei")
-_CLAMP_MIN = datetime(2026, 8, 24, 0, 0, 0, tzinfo=_TZ)
-_CLAMP_MAX = datetime(2026, 8, 31, 23, 59, 59, tzinfo=_TZ)
+CLAMP_MIN = datetime(2026, 8, 24, 0, 0, 0, tzinfo=_TZ)
+CLAMP_MAX = datetime(2026, 8, 31, 23, 59, 59, tzinfo=_TZ)
 
 
 def _clamp(moment: datetime) -> datetime:
-    if moment < _CLAMP_MIN:
-        return _CLAMP_MIN
-    if moment > _CLAMP_MAX:
-        return _CLAMP_MAX
+    if moment < CLAMP_MIN:
+        return CLAMP_MIN
+    if moment > CLAMP_MAX:
+        return CLAMP_MAX
     return moment
 
 
