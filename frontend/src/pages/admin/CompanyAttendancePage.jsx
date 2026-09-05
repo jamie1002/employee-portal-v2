@@ -3,7 +3,9 @@ import { getCompanyRecords } from "../../api/attendance.api";
 import { getDepartments } from "../../api/departments.api";
 import { getUsers } from "../../api/users.api";
 import AttendanceTable from "../../components/AttendanceTable";
+import DatePickerField from "../../components/DatePickerField";
 import RoleGate from "../../components/RoleGate";
+import { useVirtualToday } from "../../hooks/useVirtualClock";
 
 // 狀態篩選比對的是生效值（見後端 attendance_effective.py），early_leave／
 // missing_punch_out 是讀取時才衍生的判定，不是 status 欄位本身的列舉值。
@@ -31,6 +33,9 @@ function CompanyAttendanceContent() {
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  // 欄位本身維持空白（不限日期、顯示全部），只有日曆彈出視窗的初始瀏覽月份
+  // 用展示用虛擬時鐘的今天，不用真實現在時間（見 docs/PITFALLS.md B7）。
+  const virtualToday = useVirtualToday();
 
   useEffect(() => {
     getUsers().then((data) => setUsers(data.users));
@@ -130,30 +135,22 @@ function CompanyAttendanceContent() {
             ))}
           </select>
         </div>
-        <div className="w-full sm:w-auto">
-          <label htmlFor="company-attendance-start-date" className="mb-1 block text-xs text-text-muted">
-            起始日期
-          </label>
-          <input
-            id="company-attendance-start-date"
-            type="date"
-            value={startDate}
-            onChange={(event) => setStartDate(event.target.value)}
-            className={inputClass}
-          />
-        </div>
-        <div className="w-full sm:w-auto">
-          <label htmlFor="company-attendance-end-date" className="mb-1 block text-xs text-text-muted">
-            結束日期
-          </label>
-          <input
-            id="company-attendance-end-date"
-            type="date"
-            value={endDate}
-            onChange={(event) => setEndDate(event.target.value)}
-            className={inputClass}
-          />
-        </div>
+        <DatePickerField
+          id="company-attendance-start-date"
+          label="起始日期"
+          value={startDate}
+          initialViewDate={virtualToday}
+          onChange={setStartDate}
+          className="w-full sm:w-auto"
+        />
+        <DatePickerField
+          id="company-attendance-end-date"
+          label="結束日期"
+          value={endDate}
+          initialViewDate={virtualToday}
+          onChange={setEndDate}
+          className="w-full sm:w-auto"
+        />
       </div>
 
       {isLoading ? (

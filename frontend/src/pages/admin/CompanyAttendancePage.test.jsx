@@ -22,6 +22,11 @@ vi.mock("../../context/AuthContext", () => ({
   useAuth: () => ({ user: mockUser }),
 }));
 
+const mockGetDemoClock = vi.fn();
+vi.mock("../../api/demo.api", () => ({
+  getDemoClock: (...args) => mockGetDemoClock(...args),
+}));
+
 const DEPARTMENTS = [
   { id: 1, name: "研發部" },
   { id: 2, name: "業務部" },
@@ -37,6 +42,7 @@ beforeEach(() => {
   mockGetDepartments.mockReset().mockResolvedValue({ departments: DEPARTMENTS });
   mockGetUsers.mockReset().mockResolvedValue({ users: USERS });
   mockGetCompanyRecords.mockReset().mockResolvedValue({ records: [] });
+  mockGetDemoClock.mockReset().mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 08/24 09:00
 });
 
 test("非 admin 完全不渲染頁面內容（RoleGate）", () => {
@@ -91,4 +97,14 @@ test("篩選條件變動會帶對應參數重新查詢", async () => {
   await waitFor(() => expect(mockGetCompanyRecords).toHaveBeenCalledWith(
     expect.objectContaining({ department_id: "1", status: "late" }),
   ));
+});
+
+test("日期欄位維持空白（不限日期），但點開日曆一律顯示展示用虛擬時鐘的今天所在月份", async () => {
+  render(<CompanyAttendancePage />);
+  await waitFor(() => expect(mockGetDemoClock).toHaveBeenCalled());
+
+  expect(screen.getAllByRole("button", { name: "不限日期" })).toHaveLength(2);
+
+  fireEvent.click(screen.getAllByRole("button", { name: "不限日期" })[0]);
+  await waitFor(() => expect(screen.getByText("2026 年 8 月")).toBeInTheDocument());
 });

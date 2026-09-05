@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { getMyRecords } from "../api/attendance.api";
 import AttendanceTable from "../components/AttendanceTable";
+import DatePickerField from "../components/DatePickerField";
+import { useVirtualToday } from "../hooks/useVirtualClock";
 
 const PAGE_SIZE = 10;
 
@@ -25,6 +27,9 @@ export default function AttendancePage() {
   const [endDate, setEndDate] = useState("");
   const [status, setStatus] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  // 欄位本身維持空白（不限日期、顯示全部），只有日曆彈出視窗的初始瀏覽月份
+  // 用展示用虛擬時鐘的今天，不用真實現在時間（見 docs/PITFALLS.md B7）。
+  const virtualToday = useVirtualToday();
 
   useEffect(() => {
     let cancelled = false;
@@ -62,36 +67,26 @@ export default function AttendancePage() {
       <h2 className="text-xl font-medium text-text-primary">出勤紀錄</h2>
 
       <div className="glass-panel flex flex-wrap items-end gap-4 rounded-xl p-4">
-        <div>
-          <label htmlFor="start-date" className="mb-1 block text-xs text-text-muted">
-            起始日期
-          </label>
-          <input
-            id="start-date"
-            type="date"
-            value={startDate}
-            onChange={(event) => {
-              setPage(1);
-              setStartDate(event.target.value);
-            }}
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label htmlFor="end-date" className="mb-1 block text-xs text-text-muted">
-            結束日期
-          </label>
-          <input
-            id="end-date"
-            type="date"
-            value={endDate}
-            onChange={(event) => {
-              setPage(1);
-              setEndDate(event.target.value);
-            }}
-            className={inputClass}
-          />
-        </div>
+        <DatePickerField
+          id="start-date"
+          label="起始日期"
+          value={startDate}
+          initialViewDate={virtualToday}
+          onChange={(value) => {
+            setPage(1);
+            setStartDate(value);
+          }}
+        />
+        <DatePickerField
+          id="end-date"
+          label="結束日期"
+          value={endDate}
+          initialViewDate={virtualToday}
+          onChange={(value) => {
+            setPage(1);
+            setEndDate(value);
+          }}
+        />
         <div>
           <label htmlFor="status" className="mb-1 block text-xs text-text-muted">
             狀態

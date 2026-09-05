@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { downloadExportXlsx, getExportPreview } from "../../api/export.api";
 import { getDepartments } from "../../api/departments.api";
 import { getUsers } from "../../api/users.api";
+import DatePickerField from "../../components/DatePickerField";
 import RoleGate from "../../components/RoleGate";
 import { useAuth } from "../../context/AuthContext";
+import { useVirtualToday } from "../../hooks/useVirtualClock";
 
 const KIND_OPTIONS = [
   { value: "employees", label: "員工資料" },
@@ -94,6 +96,9 @@ function ExportContent() {
   const [userId, setUserId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  // 欄位本身維持空白（不限日期、顯示全部），只有日曆彈出視窗的初始瀏覽月份
+  // 用展示用虛擬時鐘的今天，不用真實現在時間（見 docs/PITFALLS.md B7）。
+  const virtualToday = useVirtualToday();
   const [departments, setDepartments] = useState([]);
   const [users, setUsers] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -246,24 +251,20 @@ function ExportContent() {
 
           {showDateFilters && (
             <>
-              <div>
-                <label htmlFor="export-start-date" className="mb-1 block text-xs text-text-muted">
-                  起始日期
-                </label>
-                <input
-                  id="export-start-date" type="date" value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)} className={inputClass}
-                />
-              </div>
-              <div>
-                <label htmlFor="export-end-date" className="mb-1 block text-xs text-text-muted">
-                  結束日期
-                </label>
-                <input
-                  id="export-end-date" type="date" value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)} className={inputClass}
-                />
-              </div>
+              <DatePickerField
+                id="export-start-date"
+                label="起始日期"
+                value={startDate}
+                initialViewDate={virtualToday}
+                onChange={setStartDate}
+              />
+              <DatePickerField
+                id="export-end-date"
+                label="結束日期"
+                value={endDate}
+                initialViewDate={virtualToday}
+                onChange={setEndDate}
+              />
             </>
           )}
         </div>

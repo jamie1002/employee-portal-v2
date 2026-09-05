@@ -10,9 +10,15 @@ vi.mock("../api/attendanceChanges.api", () => ({
   getAttendanceChanges: vi.fn().mockResolvedValue({ changes: [] }),
 }));
 
+const mockGetDemoClock = vi.fn();
+vi.mock("../api/demo.api", () => ({
+  getDemoClock: (...args) => mockGetDemoClock(...args),
+}));
+
 beforeEach(() => {
   mockGetMyRecords.mockReset();
   mockGetMyRecords.mockResolvedValue({ records: [], total: 0, page: 1, page_size: 10 });
+  mockGetDemoClock.mockReset().mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 08/24 09:00
 });
 
 test("初次載入即帶入分頁參數", async () => {
@@ -64,4 +70,14 @@ test("分頁按鈕依總筆數啟用或停用", async () => {
   await waitFor(() => expect(screen.getByText("共 25 筆")).toBeInTheDocument());
   expect(screen.getByRole("button", { name: "上一頁" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "下一頁" })).toBeEnabled();
+});
+
+test("日期欄位維持空白（不限日期），但點開日曆一律顯示展示用虛擬時鐘的今天所在月份", async () => {
+  render(<AttendancePage />);
+  await waitFor(() => expect(mockGetDemoClock).toHaveBeenCalled());
+
+  expect(screen.getAllByRole("button", { name: "不限日期" })).toHaveLength(2);
+
+  fireEvent.click(screen.getAllByRole("button", { name: "不限日期" })[0]);
+  await waitFor(() => expect(screen.getByText("2026 年 8 月")).toBeInTheDocument());
 });

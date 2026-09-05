@@ -19,6 +19,11 @@ vi.mock("../../api/users.api", () => ({
   getUsers: (...args) => mockGetUsers(...args),
 }));
 
+const mockGetDemoClock = vi.fn();
+vi.mock("../../api/demo.api", () => ({
+  getDemoClock: (...args) => mockGetDemoClock(...args),
+}));
+
 let mockUser = { id: 1, name: "系統管理者", role: "admin", department_id: null, permissions: [] };
 vi.mock("../../context/AuthContext", () => ({
   useAuth: () => ({ user: mockUser }),
@@ -36,6 +41,7 @@ beforeEach(() => {
   mockGetUsers.mockReset().mockResolvedValue({ users: USERS });
   mockGetExportPreview.mockReset();
   mockDownloadExportXlsx.mockReset();
+  mockGetDemoClock.mockReset().mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 08/24 09:00
 });
 
 test("非 admin 且無 exports.run 權限時完全不渲染", () => {
@@ -62,12 +68,12 @@ test("員工資料類型不顯示員工篩選與日期篩選；出勤類型才�
   await waitFor(() => expect(screen.getByLabelText("資料類型")).toBeInTheDocument());
 
   expect(screen.queryByLabelText("員工")).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("起始日期")).not.toBeInTheDocument();
+  expect(screen.queryByText("起始日期")).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("資料類型"), { target: { value: "attendance" } });
 
   expect(screen.getByLabelText("員工")).toBeInTheDocument();
-  expect(screen.getByLabelText("起始日期")).toBeInTheDocument();
+  expect(screen.getByText("起始日期")).toBeInTheDocument();
 });
 
 test("受限縮者的員工下拉只列自己部門的人", async () => {
@@ -135,4 +141,16 @@ test("切換資料類型會重設欄位為新類型的完整欄位並清空預�
 
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
   expect(screen.getByLabelText("上班時間")).toBeChecked();
+});
+
+test("日期篩選欄位維持空白（不限日期），但點開日曆一律顯示展示用虛擬時鐘的今天所在月份", async () => {
+  render(<ExportPage />);
+  await waitFor(() => expect(screen.getByLabelText("資料類型")).toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText("資料類型"), { target: { value: "attendance" } });
+  await waitFor(() => expect(mockGetDemoClock).toHaveBeenCalled());
+
+  expect(screen.getAllByRole("button", { name: "不限日期" })).toHaveLength(2);
+
+  fireEvent.click(screen.getAllByRole("button", { name: "不限日期" })[0]);
+  await waitFor(() => expect(screen.getByText("2026 年 8 月")).toBeInTheDocument());
 });
