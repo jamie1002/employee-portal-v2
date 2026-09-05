@@ -1,5 +1,6 @@
 """下班打卡的整合測試：工時計算、早退判定、回應必備欄位。"""
 
+import asyncio
 from datetime import datetime, timedelta
 
 from app.utils.virtual_clock import set_virtual_clock
@@ -61,6 +62,29 @@ async def test_duplicate_punch_out_returns_409(client):
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "ALREADY_PUNCHED_OUT"
+
+
+async def test_concurrent_punch_out_exactly_one_succeeds(client, db):
+    """跟 test_attendance_punch_in.py 的並行上班打卡測試同一類風險：兩個並行的
+    下班打卡請求都可能通過應用層的「今天下班了嗎」檢查，要靠 upsert_attendance()
+    的原子 guard（require_field_null）擋下第二筆，而不是兩個都成功。"""
+    headers = await login_headers(client, "employee@demo.com")
+    await _punch_in_at(client, headers, taipei(2026, 8, 24, 9, 0))
+    await set_virtual_clock(taipei(2026, 8, 24, 18, 0))
+
+    first, second = await asyncio.gather(
+        client.post("/api/attendance/punch-out", headers=headers),
+        client.post("/api/attendance/punch-out", headers=headers),
+    )
+
+    assert sorted([first.status_code, second.status_code]) == [200, 409]
+    stored = await db.fetchrow(
+        "SELECT punch_in_time, punch_out_time FROM attendances "
+        "WHERE user_id = (SELECT id FROM users WHERE email = 'employee@demo.com') "
+        "AND punch_date = '2026-08-24'"
+    )
+    assert stored["punch_in_time"] is not None
+    assert stored["punch_out_time"] is not None
 
 
 async def test_response_carries_thresholds_for_the_frontend(client):

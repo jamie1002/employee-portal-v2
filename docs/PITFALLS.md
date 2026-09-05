@@ -63,6 +63,16 @@
 
 **修法**：在連線池的 `init` 回呼註冊 `numeric` 的 type codec，編碼與解碼都用 `str`。前端顯示格式與所有測試斷言都依賴 `"8.00"` 這個格式，不要改成 float。
 
+### A7. 「先查、有列就 UPDATE、沒有就 INSERT」不是原子操作，並行時會讓 UNIQUE 防線失效
+
+**症狀**：CI 間歇性出現 `test_concurrent_punch_in_exactly_one_succeeds` 失敗，`assert sorted([first.status_code, second.status_code]) == [201, 409]` 拿到 `[201, 201]`——兩個並行的上班打卡都「成功」了，本機單獨重跑幾乎必過，很容易被誤判成單純的 CI 環境雜訊。
+
+**根因**：`upsert_attendance()` 原本的寫法是「先 `SELECT` 有沒有既有列、有就 `UPDATE`、沒有就 `INSERT`」，這個決策橫跨兩個獨立的資料庫陳述式，中間隔著一段 `await`。兩個並行的上班打卡各自的 `SELECT` 都可能先看到「沒有列」而決定要 `INSERT`；但真正執行到那個 `INSERT` 時，其中一個請求所在的交易已經因為另一個先提交而看到「有列了」，於是它會**再查一次並改口走 `UPDATE` 分支**（這是 `upsert_attendance()` 自己的邏輯，不是資料庫幫你做的），安靜地把對方剛寫入的資料覆蓋成幾乎相同的值——`UNIQUE(user_id, punch_date)` 這道防線因此完全沒被踩到，兩邊都以為自己合法地建立或更新了一筆紀錄。這跟 E6 是同一類「共用可變狀態 + 非原子的檢查再行動」問題，只是這次共用狀態是資料庫的一列，不是 e2e 的種子資料。
+
+**修法**：不要用「查了再決定要 INSERT 還是 UPDATE」這種橫跨兩個陳述式的邏輯保護並行安全，改用單一陳述式的 `INSERT ... ON CONFLICT (user_id, punch_date) DO UPDATE ... WHERE <欄位> IS NULL RETURNING ...`——PostgreSQL 保證同一時間只有一個交易能通過 `WHERE` guard，另一個會因為 `RETURNING` 不到列而明確知道自己輸了race，由呼叫端據此回報 409，而不是誤判成功。`upsert_attendance()` 加了 `require_field_null` 參數做這件事，`punch_in()`／`punch_out()` 都改用它；不需要並行安全的呼叫端（種子腳本）維持原本的一般 upsert 語意不受影響。
+
+**驗收方式**：光靠「重跑幾次沒再失敗」不能證明修好了，因為原本的 bug 本來就不是每次都觸發——本機用迴圈連續重跑該測試十幾次確認穩定全綠，且要理解成因（追蹤兩個陳述式之間的競態視窗），而不是只看到「這次綠了」就結案。
+
 ---
 
 ## B. 時區與時間

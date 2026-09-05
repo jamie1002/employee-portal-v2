@@ -83,7 +83,7 @@ Neon.tech（PostgreSQL，Serverless）
 需要 Node.js 20+、Python 3.12、Docker。
 
 ```bash
-docker compose up -d                          # 啟動本機 PostgreSQL（開發 5432 / 測試 5433）
+docker compose up -d                          # 啟動本機 PostgreSQL（開發 5442 / 測試 5443，避開舊專案佔用的 5432/5433）
 cp .env.example .env
 npm install
 pip install -r backend/requirements.txt
@@ -225,6 +225,8 @@ npm test               # 後端 + 前端
 ## CI
 
 `.github/workflows/ci.yml` 在 push／PR 時執行：起兩個 PostgreSQL 服務容器 → migrate + seed → 後端 pytest → 前端 Vitest → 前端 build → Playwright e2e。本機與 CI 使用**完全相同的 npm 指令**，不另寫第二份初始化流程。
+
+e2e 刻意設定 `fullyParallel: false`、`workers: 1` 循序執行（見 `playwright.config.js`）：e2e 打的是同一份沒有交易隔離的開發資料庫，平行 worker 會讓測試互相干擾造成間歇性失敗（見 `docs/PITFALLS.md` E6）。這會讓 e2e job 變慢，但比起「間歇性紅燈、每次都要重跑確認是不是真的壞掉」划算。
 
 CD 不另外寫部署腳本——Vercel 與 Render 都原生支援「接上 GitHub repo 後，push 到追蹤分支即自動建置部署」。
 

@@ -108,20 +108,61 @@ async def upsert_attendance(
     work_hours: float | None,
     now: datetime,
     is_early_leave: bool = False,
-) -> asyncpg.Record:
+    require_field_null: str | None = None,
+) -> asyncpg.Record | None:
     """寫入「實際打卡」這件原始事實（僅 punch_in()／punch_out() 呼叫）。
 
     `now` 由呼叫端傳入 get_virtual_now() 算出的值，明確寫入 created_at／updated_at：
     本表刻意沒有 updated_at 觸發器，因為觸發器內的 SQL now() 不知道虛擬時鐘的偏移量
     （見 docs/PITFALLS.md A3）。
 
-    **刻意不用 `INSERT ... ON CONFLICT DO UPDATE`**：那會讓兩個並行的上班打卡都「成功」
-    （後到的那筆變成 UPDATE 覆蓋先到的），等於自己拆掉 `UNIQUE(user_id, punch_date)`
-    這道 TOCTOU 防線。維持「先查、有列就 UPDATE、沒有就 INSERT」，並行時後到的
-    INSERT 會撞上唯一鍵拋 23505，由錯誤中介層轉譯成 409，正是我們要的行為。
-    存在但還沒有上班時間的列（例如曠職排程補的 absent 列，虛擬時鐘往回撥後又去打卡）
-    則走 UPDATE 分支，不會被誤判成「今日已完成上班打卡」。
+    `require_field_null`：傳入 `"punch_in_time"` 或 `"punch_out_time"` 時，改用單一原子
+    的 `INSERT ... ON CONFLICT DO UPDATE ... WHERE <欄位> IS NULL` 陳述式，guard 失敗
+    （該欄位已經有值）時 `RETURNING` 不到列，回傳 `None` 交由呼叫端決定要回什麼錯誤。
+
+    這是必要的：原本「先 SELECT 有沒有既有列、有就 UPDATE、沒有就 INSERT」這個決策本身
+    橫跨兩個獨立陳述式，兩個並行的上班打卡都可能各自的 SELECT 先看到「沒有列」而各自
+    決定要 INSERT——但真正執行到 INSERT 時，其中一個已經因為對方剛提交而改口說「喔，
+    有列了，那我 UPDATE」，於是兩個都「成功」，`UNIQUE(user_id, punch_date)` 這道防線
+    根本沒被真正踩到（實測過：`asyncio.gather` 兩個並行請求，在 CI 環境下確實會重現
+    兩個都拿到 201，見 docs/PITFALLS.md A7）。改成單一陳述式的 `INSERT ... ON CONFLICT`
+    後，PostgreSQL 保證同一時間只有一個交易能通過那個 `WHERE ... IS NULL` guard，另一個
+    要嘛等前者提交後看到欄位已非 NULL 而不更新（`RETURNING` 不到列），沒有中間狀態可鑽。
+
+    未傳 `require_field_null` 時維持原本「先查、有列就 UPDATE、沒有就 INSERT」的一般
+    upsert 語意，供不需要並行安全（如種子腳本）的呼叫端使用。
     """
+    if require_field_null is not None:
+        if require_field_null not in ("punch_in_time", "punch_out_time"):
+            raise ValueError(f"不支援的 require_field_null：{require_field_null!r}")
+        guard_column = require_field_null
+        return await pool.fetchrow(
+            f"""
+            INSERT INTO attendances (
+                user_id, punch_date, punch_in_time, punch_out_time, status,
+                work_hours, is_early_leave, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+            ON CONFLICT (user_id, punch_date) DO UPDATE
+            SET punch_in_time = EXCLUDED.punch_in_time,
+                punch_out_time = EXCLUDED.punch_out_time,
+                status = EXCLUDED.status,
+                work_hours = EXCLUDED.work_hours,
+                is_early_leave = EXCLUDED.is_early_leave,
+                updated_at = EXCLUDED.updated_at
+            WHERE attendances.{guard_column} IS NULL
+            RETURNING {COLUMNS}
+            """,
+            user_id,
+            pg_date(punch_date),
+            punch_in_time,
+            punch_out_time,
+            status,
+            work_hours,
+            is_early_leave,
+            now,
+        )
+
     existing_id = await pool.fetchval(
         "SELECT id FROM attendances WHERE user_id = $1 AND punch_date = $2",
         user_id,

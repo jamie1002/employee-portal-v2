@@ -90,8 +90,12 @@ async def punch_in(pool: asyncpg.Pool, user_id: int) -> dict:
 
     record = await attendance_repository.upsert_attendance(
         pool, user_id, punch_date, now, punch_out_time, status, work_hours, now,
-        is_early_leave=is_early_leave,
+        is_early_leave=is_early_leave, require_field_null="punch_in_time",
     )
+    if record is None:
+        # 兩個並行的上班打卡都通過了上面的應用層檢查，真正決定勝負的是
+        # upsert_attendance() 內建的原子 guard（見該函式註解），輸的這邊在這裡回報。
+        raise AppError(409, "今日已完成上班打卡。", "ALREADY_PUNCHED_IN")
     return {**_with_punch_flags(record), "is_workday": workday}
 
 
@@ -127,8 +131,10 @@ async def punch_out(pool: asyncpg.Pool, user_id: int) -> dict:
 
     record = await attendance_repository.upsert_attendance(
         pool, user_id, punch_date, punch_in_time, now, existing["status"], work_hours, now,
-        is_early_leave=is_early_leave,
+        is_early_leave=is_early_leave, require_field_null="punch_out_time",
     )
+    if record is None:
+        raise AppError(409, "今日已完成下班打卡。", "ALREADY_PUNCHED_OUT")
     return {
         **_with_punch_flags(record),
         "is_workday": workday,
