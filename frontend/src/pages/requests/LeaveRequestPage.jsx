@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { getHolidays } from "../../api/holidays.api";
 import { createLeaveRequest } from "../../api/requests.api";
 import { getSettings } from "../../api/settings.api";
+import { estimateLeaveHours } from "../../utils/leaveHours";
 
 // 後端 TIME 欄位序列化含秒（"09:00:00"），<input type="time"> 只吃 "HH:mm"。
 function toInputTime(value) {
@@ -29,15 +31,29 @@ export default function LeaveRequestPage() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFullDay, setIsFullDay] = useState(false);
-  const [workHours, setWorkHours] = useState({ start: "", end: "" });
+  const [settings, setSettings] = useState(null);
+  const [holidayDates, setHolidayDates] = useState(new Set());
 
   const isReasonRequired = leaveType !== OPTIONAL_REASON_TYPE;
+  const workHours = {
+    start: settings ? toInputTime(settings.work_start_time) : "",
+    end: settings ? toInputTime(settings.work_end_time) : "",
+  };
 
   useEffect(() => {
-    getSettings().then(({ settings }) => {
-      setWorkHours({ start: toInputTime(settings.work_start_time), end: toInputTime(settings.work_end_time) });
+    Promise.all([getSettings(), getHolidays()]).then(([settingsData, holidaysData]) => {
+      setSettings(settingsData.settings);
+      setHolidayDates(new Set(holidaysData.holidays.map((h) => h.holiday_date)));
     });
   }, []);
+
+  // 即時預估時數（UI-SPEC.md §3.8）：純前端本地預覽，正式時數以送出後的後端
+  // 回應為準，但演算法必須跟後端 leave_hours.py 逐步對應，不能各算一套
+  // （見 utils/leaveHours.js 模組說明）。
+  const estimatedHours = useMemo(
+    () => estimateLeaveHours({ startDate, startTime, endDate, endTime, settings, holidayDates }),
+    [startDate, startTime, endDate, endTime, settings, holidayDates],
+  );
 
   // 「整天」勾選框自動帶入表定上下班時間（UI-SPEC.md §3.8）；勾選期間時間欄位
   // 停用，避免使用者手動改動後跟畫面上的「整天」語意不一致。
@@ -164,9 +180,14 @@ export default function LeaveRequestPage() {
           </div>
         </div>
 
-        <p className="text-xs text-text-muted">
-          時數以逐工作日與表定工時的交集計算，跳過週末與國定假日；正式時數以送出後的後端回應為準。
-        </p>
+        <div>
+          {estimatedHours > 0 && (
+            <p className="text-sm text-accent-400">預估時數：{estimatedHours} 小時</p>
+          )}
+          <p className="text-xs text-text-muted">
+            時數以逐工作日與表定工時的交集計算，跳過週末與國定假日；正式時數以送出後的後端回應為準。
+          </p>
+        </div>
 
         <div>
           <label htmlFor="reason" className="mb-1 block text-xs text-text-muted">

@@ -13,6 +13,11 @@ vi.mock("../../api/settings.api", () => ({
   getSettings: (...args) => mockGetSettings(...args),
 }));
 
+const mockGetHolidays = vi.hoisted(() => vi.fn());
+vi.mock("../../api/holidays.api", () => ({
+  getHolidays: (...args) => mockGetHolidays(...args),
+}));
+
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual("react-router-dom");
@@ -36,6 +41,7 @@ beforeEach(() => {
       lunch_start_time: "12:00:00", lunch_end_time: "13:00:00", grace_period_minutes: 10,
     },
   });
+  mockGetHolidays.mockReset().mockResolvedValue({ holidays: [] });
 });
 
 test("預設假別為事假時申請理由為必填", () => {
@@ -88,4 +94,18 @@ test("勾選整天會自動帶入表定上下班時間並停用時間欄位", as
 
   fireEvent.click(screen.getByRole("checkbox", { name: /整天/ }));
   expect(screen.getByLabelText("開始時間")).not.toBeDisabled();
+});
+
+test("填完起訖日期時間後即時顯示預估時數，欄位未填齊時不顯示", async () => {
+  renderPage();
+  await waitFor(() => expect(mockGetSettings).toHaveBeenCalled());
+
+  expect(screen.queryByText(/預估時數/)).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("開始日期"), { target: { value: "2026-08-24" } });
+  fireEvent.change(screen.getByLabelText("開始時間"), { target: { value: "09:00" } });
+  fireEvent.change(screen.getByLabelText("結束日期"), { target: { value: "2026-08-24" } });
+  fireEvent.change(screen.getByLabelText("結束時間"), { target: { value: "18:00" } });
+
+  await waitFor(() => expect(screen.getByText("預估時數：8 小時")).toBeInTheDocument());
 });

@@ -93,9 +93,11 @@ npm run dev                                   # 前後端同時啟動
 
 | 角色 | 帳號 | 密碼 |
 | :--- | :--- | :--- |
-| 系統管理者 | `admin@demo.com` | `Admin123!` |
-| 部門主管 | `manager@demo.com` | `Manager123!` |
-| 一般員工 | `employee@demo.com` | `Employee123!` |
+| 系統管理者 | `admin@demo.com` | `Demo1234` |
+| 部門主管 | `manager@demo.com` | `Demo1234` |
+| 一般員工 | `employee@demo.com` | `Demo1234` |
+
+三組展示帳號密碼一律相同（`Demo1234`），登入頁也提供一鍵代入按鈕不需手動輸入。
 
 ### 指令一覽
 
