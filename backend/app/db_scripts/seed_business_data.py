@@ -176,6 +176,20 @@ async def seed_business_data(conn: asyncpg.Connection) -> None:
         created_at=_at(other_overtime_day, "21:00"), reviewed_at=None,
     )
 
+    # 已駁回：湊齊 pending／approved／rejected 三種狀態供審核中心與種子一致性測試
+    # 涵蓋（見 tests/test_seed_data_consistency.py）。挑 08/18（陳小華當天已有遲到
+    # 出勤紀錄 09:22），起算點一樣呼叫 compute_overtime_eligible_start() 算出。
+    rejected_overtime_day = date(2026, 8, 18)
+    rejected_eligible_start = compute_overtime_eligible_start(
+        _at(rejected_overtime_day, "09:22"), rejected_overtime_day, settings, _TZ,
+    )
+    await _seed_overtime_request(
+        conn, settings, EMPLOYEE_ID,
+        rejected_eligible_start, rejected_eligible_start + timedelta(hours=1),
+        status="rejected", reviewer_id=MANAGER_ID, review_note="加班事由不夠具體，請補充實際處理的工作內容",
+        created_at=_at(rejected_overtime_day, "21:00"), reviewed_at=_at(date(2026, 8, 19), "09:00"),
+    )
+
     # ---- 補打卡：已核准（示範「已異動」）＋ 待審（示範審核中心待辦） ----
     await _seed_punch_request(
         conn, EMPLOYEE_ID, "in", date(2026, 8, 18), _at(date(2026, 8, 18), "09:05"), None,

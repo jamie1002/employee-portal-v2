@@ -5,6 +5,7 @@ from app.utils.virtual_clock import set_virtual_clock
 from tests.helpers import EMPLOYEE_ID, login_headers, taipei
 
 TUESDAY = "2026-08-25"
+SATURDAY = "2026-08-29"
 
 
 async def test_half_hour_boundary_returns_201(client):
@@ -131,3 +132,118 @@ async def test_overtime_not_blocked_when_no_attendance_record(client):
     )
 
     assert response.status_code == 201
+
+
+async def test_create_success(client):
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{TUESDAY}T18:00:00+08:00", "end_time": f"{TUESDAY}T20:00:00+08:00", "reason": "專案上線前準備"},
+    )
+
+    assert response.status_code == 201
+    assert float(response.json()["request"]["hours"]) == 2
+    assert response.json()["request"]["status"] == "pending"
+
+
+async def test_hours_not_excluded_on_weekend(client):
+    # 區間刻意選在午休之後（13:00–17:00），避免與午休扣除規則混在一起。
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{SATURDAY}T13:00:00+08:00", "end_time": f"{SATURDAY}T17:00:00+08:00", "reason": "假日支援上線"},
+    )
+
+    assert response.status_code == 201
+    assert float(response.json()["request"]["hours"]) == 4
+
+
+async def test_hours_deduct_lunch_overlap_across_workday_lunch(client):
+    """假日出勤橫跨表定午休的加班申請，午休時段不應計入加班時數——
+    09:00–13:00 扣除 12:00–13:00 的午休重疊，剩 3 小時。"""
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{SATURDAY}T09:00:00+08:00", "end_time": f"{SATURDAY}T13:00:00+08:00", "reason": "假日支援上線"},
+    )
+
+    assert response.status_code == 201
+    assert float(response.json()["request"]["hours"]) == 3
+
+
+async def test_end_before_start_returns_400(client):
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{TUESDAY}T20:00:00+08:00", "end_time": f"{TUESDAY}T18:00:00+08:00", "reason": "加班"},
+    )
+
+    assert response.status_code == 400
+
+
+async def test_start_not_half_hour_aligned_hours_floored(client):
+    """不鎖死起訖時間須對齊整點／半點——18:15~20:00 共 1h45m，
+    以 30 分鐘為單位捨去為 1.5 小時，應成功送出。"""
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{TUESDAY}T18:15:00+08:00", "end_time": f"{TUESDAY}T20:00:00+08:00", "reason": "加班"},
+    )
+
+    assert response.status_code == 201
+    assert float(response.json()["request"]["hours"]) == 1.5
+
+
+async def test_end_not_half_hour_aligned_hours_floored(client):
+    """18:00~20:45 共 2h45m，以 30 分鐘為單位捨去為 2.5 小時。"""
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{TUESDAY}T18:00:00+08:00", "end_time": f"{TUESDAY}T20:45:00+08:00", "reason": "加班"},
+    )
+
+    assert response.status_code == 201
+    assert float(response.json()["request"]["hours"]) == 2.5
+
+
+async def test_user_reported_example_18_40_to_21_10_is_2_5_hours(client):
+    """迴歸鎖定：18:40 加班到 21:10 應為完整 2.5 小時，不能因為整點／半點
+    對齊規則被誤判成其他時數或直接擋下。"""
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{TUESDAY}T18:40:00+08:00", "end_time": f"{TUESDAY}T21:10:00+08:00", "reason": "加班"},
+    )
+
+    assert response.status_code == 201
+    assert float(response.json()["request"]["hours"]) == 2.5
+
+
+async def test_half_hour_boundary_ok(client):
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{TUESDAY}T18:30:00+08:00", "end_time": f"{TUESDAY}T20:30:00+08:00", "reason": "加班"},
+    )
+
+    assert response.status_code == 201
+    assert float(response.json()["request"]["hours"]) == 2
+
+
+async def test_missing_reason_returns_400(client):
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post(
+        "/api/overtime-requests", headers=headers,
+        json={"start_time": f"{TUESDAY}T18:00:00+08:00", "end_time": f"{TUESDAY}T20:00:00+08:00"},
+    )
+
+    assert response.status_code == 400
