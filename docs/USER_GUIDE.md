@@ -8,9 +8,11 @@ Employee Portal 是一套企業員工管理與出勤系統的展示（Demo）專
 
 登入頁提供「一鍵代入」按鈕，點一下就會自動代入帳密並登入，不需要手動輸入：
 
-- 系統管理者：`admin@demo.com` / `Admin123!`
-- 部門主管：`manager@demo.com` / `Manager123!`
-- 一般員工：`employee@demo.com` / `Employee123!`
+- 系統管理者：`admin@demo.com` / `Demo1234`
+- 部門主管：`manager@demo.com` / `Demo1234`
+- 一般員工：`employee@demo.com` / `Demo1234`
+
+三個角色共用同一組密碼。
 
 這三組帳密固定不變，任何時候都可以用來登入。想體驗「新帳號首次登入強制改密碼」的流程，用 `admin` 登入後到「員工資訊」建立一個新的員工帳號即可。
 

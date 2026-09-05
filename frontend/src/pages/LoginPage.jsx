@@ -1,5 +1,7 @@
+import { Fingerprint } from "lucide-react";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { AboutModal } from "../components/AboutModal";
 import { useAuth } from "../context/AuthContext";
 
 // 展示帳號固定密碼（見 SPEC.md §1）。刻意不是元件狀態，避免被寫進
@@ -20,6 +22,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   // useRef 做「檢查並設定」：useState 的更新不會在同一個事件迴圈內同步生效，
   // 快速連點仍可能在 setIsSubmitting(true) 生效前重複觸發送出。
   const isSubmittingRef = useRef(false);
@@ -57,11 +60,25 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-md space-y-4">
         <div className="glass-panel rounded-xl p-6">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h1 className="text-lg font-medium text-text-primary">Employee Portal</h1>
-              <p className="text-sm text-text-secondary">企業員工管理與出勤系統</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent-500/10 text-accent-400 ring-1 ring-accent-500/40">
+                <Fingerprint className="h-6 w-6" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
+                  Employee <span className="text-accent-400">Portal</span>
+                </h1>
+                <p className="text-sm text-text-secondary">企業員工管理與出勤系統</p>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setShowAbout(true)}
+              className="whitespace-nowrap rounded-lg border border-accent-500/60 bg-accent-500/10 px-3 py-1.5 text-xs font-medium text-accent-400 hover:border-accent-500 hover:bg-accent-500/20 hover:text-accent-300"
+            >
+              📖 查看專案說明
+            </button>
           </div>
 
           <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
@@ -129,6 +146,8 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </div>
   );
 }

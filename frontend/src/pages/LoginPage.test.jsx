@@ -51,6 +51,18 @@ test("登入失敗時顯示後端回傳的錯誤訊息", async () => {
   expect(await screen.findByText("電子郵件或密碼錯誤。")).toBeInTheDocument();
 });
 
+test("點擊「查看專案說明」會開啟使用手冊，點關閉會收起", async () => {
+  renderLoginPage();
+
+  expect(screen.queryByText("專案說明")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /查看專案說明/ }));
+  expect(await screen.findByText("使用手冊")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "關閉" }));
+  expect(screen.queryByText("使用手冊")).not.toBeInTheDocument();
+});
+
 test("重複點擊一鍵代入時只送出一次請求", async () => {
   let resolveLogin;
   mockLogin.mockReturnValue(
