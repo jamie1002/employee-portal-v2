@@ -334,6 +334,7 @@ export function hasAccess(user, { roles, permissions } = {}) {
 | `AboutModal` | 渲染 `docs/USER_GUIDE.md` |
 | `SimpleMarkdown` | 只支援標題／`-` 條列／粗體／行內程式碼／引言／段落。**空行才代表段落結束**（需段落緩衝），清單續行併回上一項。禁止 `dangerouslySetInnerHTML` |
 | `LeaveQuotaSummary` | 假別卡片，排除「公假」 |
+| `DatePickerField` | 自製日期選擇元件，取代原生 `<input type="date">`。欄位可以是空字串（區間篩選器的「不限日期」）；日曆彈出視窗**一律**用呼叫端傳入的 `initialViewDate`（來自 `useVirtualToday()`）決定初始顯示月份，不受瀏覽器真實現在時間影響。面板用 `createPortal` 掛到 `document.body`，避免祖先的 `.glass-panel`（`backdrop-filter`）建立堆疊環境而蓋住面板 |
 
 ---
 
