@@ -246,6 +246,14 @@ v4 是 CSS-first，設計 token 一律寫在 `index.css` 的 `@theme`。建立 c
 2. 回填的批次寫入一律用 `INSERT ... ON CONFLICT (user_id, punch_date) DO NOTHING`，不能用 `attendance_repository.upsert_attendance()`（那支是「先查、有列就 UPDATE」，會覆蓋掉劇本資料）。
 3. `leave_requests` 沒有能擋重複的唯一鍵，理論上回填的隨機請假可能跟劇本指定的請假撞在同一天，機率極低（各 5%）且純屬展示資料的美觀瑕疵，接受不特別處理。
 
+### E6. e2e 不能對共用、無隔離的開發資料庫平行執行
+
+**症狀**：CI 的 e2e job 間歇性失敗，同一支測試（`admin.spec.js` 授權後即時生效那支）在多次執行裡有時全綠、有時卡在等某個選單連結出現，本地重跑或單獨跑該檔又會過。
+
+**根因**：`playwright.config.js` 設了 `fullyParallel: true`，CI 預設會開兩個以上的 worker——但這與 E4 是同一個限制的另一面：e2e 打的是**同一份沒有交易隔離的開發資料庫**，`fullyParallel: true` 讓 Playwright 連同一個 spec 檔裡的不同測試都可能被排進不同 worker 同時執行，兩個測試同時打同一批固定 seed 帳號（陳小華、admin 等）就會互相干擾或在 CI 有限的 CPU 下把回應拖到超過斷言的 timeout。**舊版 `employee-portal` 已經因為同樣的原因把 e2e 設定寫死成 `fullyParallel: false, workers: 1`**（見它的 `e2e/playwright.config.js` 註解），v2 重建時沒有把這個決策一併搬過來，等於重新踩了一次已經解決過的坑。
+
+**修法**：`fullyParallel: false` 且 `workers: 1`，e2e 全部依檔名序循序執行，用時間換取決定性。這會讓 CI 的 e2e job 變慢（測試數不多，實測仍在可接受範圍），但比起「間歇性紅燈、每次都要重跑確認是不是真的壞掉」划算得多。**不要因為某次 e2e 綠燈就以為這裡沒問題**——沒開這個設定時，失敗與否很大程度上是運氣（CI runner 那次剛好排到同 worker 或剛好夠快）。
+
 ---
 
 ## F. 效能
