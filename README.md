@@ -196,14 +196,14 @@ npm test               # 後端 + 前端
 - **前端（Vercel）**：Root Directory 設為 `frontend`，`frontend/vercel.json` 提供 SPA 路由改寫
 - **後端（Render）**：`render.yaml`，`healthCheckPath` 指向 `/api/health`
 - **資料庫（Neon.tech）**：連線字串自動偵測非本機 host 以啟用 SSL。**務必與 Render 選同一個地區**，跨區部署會讓每次查詢多付數百毫秒
-- 正式環境（`NODE_ENV=production`）若 `CORS_ORIGINS` 未設定或為 `*`，應用程式啟動時直接終止
+- 正式環境（`ENVIRONMENT=production`）若 `CORS_ORIGINS` 未設定或為 `*`，應用程式啟動時直接終止（`AppSettings` 的 model_validator）
 
 ### 首次上線流程
 
 機密值一律不進版控（`.env` 已被 `.gitignore` 排除）。
 
 1. **GitHub**：`gh auth login --web`，若 repo 含 `.github/workflows/` 需先 `gh auth refresh -h github.com -s workflow` 補授權，再 `gh repo create <name> --public --source=. --remote=origin --push`
-2. **Neon**：建立專案（**選美國東部，與 Render 同區**），取得 pooled connection string；本機執行一次：
+2. **Neon**：建立專案（**選 US East (Ohio)**——`render.yaml` 已把 Render 服務的 `region` 釘在 `ohio`，Neon 的 US East 選項要跟著選 Ohio 而非 N. Virginia，否則跨區會讓每次查詢多付數百毫秒），取得 pooled connection string；本機執行一次：
    ```bash
    DATABASE_URL="<neon-connection-string>" npm run db:migrate
    DATABASE_URL="<neon-connection-string>" npm run db:seed

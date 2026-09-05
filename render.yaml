@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: employee-portal-api
+    env: python
+    rootDir: backend
+    plan: free
+    region: ohio
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN_HOURS
+        value: "24"
+      - key: APP_TIMEZONE
+        value: Asia/Taipei
+      - key: CORS_ORIGINS
+        sync: false
+      - key: DEMO_RESET_IDLE_MINUTES
+        value: "15"

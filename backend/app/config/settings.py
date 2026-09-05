@@ -1,5 +1,6 @@
 """環境變數集中管理。所有設定一律從這裡讀取，禁止在程式碼各處直接呼叫 os.environ。"""
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +29,14 @@ class AppSettings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @model_validator(mode="after")
+    def _forbid_open_cors_in_production(self) -> "AppSettings":
+        # 開放 CORS 的正式環境等於任何網站都能代替使用者打這組 API；寧可讓服務
+        # 啟動失敗，也不要放行一個沒設定明確白名單的正式環境（README.md 雲端部署章節）。
+        if self.ENVIRONMENT == "production" and (not self.CORS_ORIGINS.strip() or self.CORS_ORIGINS.strip() == "*"):
+            raise ValueError("正式環境（ENVIRONMENT=production）必須設定明確的 CORS_ORIGINS，不得留空或設為 *")
+        return self
 
 
 app_settings = AppSettings()
