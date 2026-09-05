@@ -235,6 +235,17 @@ v4 是 CSS-first，設計 token 一律寫在 `index.css` 的 `@theme`。建立 c
 
 **修法**：本機跑 e2e 前一律 `npm run db:reset`。
 
+### E5. 歷史回填必須排在劇本式種子資料之後，且只能補洞不能覆蓋
+
+**症狀**：加回半年份的歷史出勤回填（`db_scripts/backfill_history.py`）後，原本手寫的近兩週劇本（例如陳小華 08/19 的整天特別休假、08/21 的曠職示範）如果被回填悄悄覆寫掉，畫面上的敘事就會跟 `seed_business_data.py` 的註解對不上。
+
+**根因**：`seed_business_data.py` 用具名的原始輸入手刻少數幾天的劇本（配合真實的業務函式算出衍生值），回填則是用固定亂數種子（`random.Random(42)`）對**同一段時間窗**（2026-05-01 ~ 08-23）逐工作日隨機生成 normal／late／absent／請假。兩者的日期範圍本來就會重疊。
+
+**修法**：
+1. 呼叫順序上，`run_backfill()` 一定要排在 `seed_business_data()` 手寫劇本**之後**。
+2. 回填的批次寫入一律用 `INSERT ... ON CONFLICT (user_id, punch_date) DO NOTHING`，不能用 `attendance_repository.upsert_attendance()`（那支是「先查、有列就 UPDATE」，會覆蓋掉劇本資料）。
+3. `leave_requests` 沒有能擋重複的唯一鍵，理論上回填的隨機請假可能跟劇本指定的請假撞在同一天，機率極低（各 5%）且純屬展示資料的美觀瑕疵，接受不特別處理。
+
 ---
 
 ## F. 效能
