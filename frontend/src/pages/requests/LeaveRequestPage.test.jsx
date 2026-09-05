@@ -18,6 +18,11 @@ vi.mock("../../api/holidays.api", () => ({
   getHolidays: (...args) => mockGetHolidays(...args),
 }));
 
+const mockGetDemoClock = vi.hoisted(() => vi.fn());
+vi.mock("../../api/demo.api", () => ({
+  getDemoClock: (...args) => mockGetDemoClock(...args),
+}));
+
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual("react-router-dom");
@@ -42,6 +47,14 @@ beforeEach(() => {
     },
   });
   mockGetHolidays.mockReset().mockResolvedValue({ holidays: [] });
+  mockGetDemoClock.mockReset().mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 08/24 09:00
+});
+
+test("沒有 ?date= 查詢參數時，起訖日期預設帶入展示用虛擬時鐘的今天，不留空", async () => {
+  renderPage();
+
+  await waitFor(() => expect(screen.getByLabelText("開始日期")).toHaveValue("2026-08-24"));
+  expect(screen.getByLabelText("結束日期")).toHaveValue("2026-08-24");
 });
 
 test("預設假別為事假時申請理由為必填", () => {

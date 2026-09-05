@@ -14,6 +14,11 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
+const mockGetDemoClock = vi.hoisted(() => vi.fn());
+vi.mock("../../api/demo.api", () => ({
+  getDemoClock: (...args) => mockGetDemoClock(...args),
+}));
+
 function renderPage(initialPath = "/requests/punch/new") {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
@@ -25,6 +30,7 @@ function renderPage(initialPath = "/requests/punch/new") {
 beforeEach(() => {
   mockCreate.mockReset();
   mockNavigate.mockReset();
+  mockGetDemoClock.mockReset().mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 08/24 09:00
 });
 
 test("預設只顯示上班時間欄位", () => {
@@ -47,6 +53,12 @@ test("查詢參數 date 會預填日期欄位", () => {
   renderPage("/requests/punch/new?date=2026-08-24");
 
   expect(screen.getByLabelText("日期")).toHaveValue("2026-08-24");
+});
+
+test("沒有查詢參數時日期欄位預設帶入展示用虛擬時鐘的今天，不留空", async () => {
+  renderPage();
+
+  await vi.waitFor(() => expect(screen.getByLabelText("日期")).toHaveValue("2026-08-24"));
 });
 
 test("送出成功後導向我的申請頁", async () => {

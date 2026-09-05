@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { createPunchRequest } from "../../api/requests.api";
+import { useVirtualToday } from "../../hooks/useVirtualClock";
 
 function toIso(date, time) {
   if (!date || !time) return undefined;
@@ -21,6 +22,14 @@ export default function PunchRequestPage() {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 沒有從首頁異常通知帶 ?date= 預填時，日期欄位預設帶入展示用虛擬時鐘的今天，
+  // 避免使用者點開日期選擇器時被瀏覽器原生 UI 帶到真實現在的月份
+  // （見 docs/PITFALLS.md B6）。
+  const virtualToday = useVirtualToday();
+  useEffect(() => {
+    if (virtualToday && !targetDate) setTargetDate(virtualToday);
+  }, [virtualToday, targetDate]);
 
   const showIn = type === "in" || type === "both";
   const showOut = type === "out" || type === "both";

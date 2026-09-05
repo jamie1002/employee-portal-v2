@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getDemoClock } from "../api/demo.api";
+import { taipeiDateKey } from "../utils/datetime";
 
 const RESYNC_INTERVAL_MS = 60_000;
 const TICK_INTERVAL_MS = 1_000;
@@ -39,4 +40,29 @@ export function useVirtualClock() {
   }, []);
 
   return virtualNow;
+}
+
+// 日期選擇欄位的預設值一律用這個 hook，取展示用虛擬時鐘的「今天」（台北曆法日期）
+// ——不要留空讓瀏覽器原生的日期選擇器用真實現在時間頂替（見 docs/PITFALLS.md B6）。
+// 只取一次、不逐秒更新：日期預設值不需要秒級精度，沒必要多訂閱一個每秒 re-render
+// 的來源。
+export function useVirtualToday() {
+  const [today, setToday] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDemoClock()
+      .then(({ virtual_now }) => {
+        if (!cancelled) setToday(taipeiDateKey(virtual_now));
+      })
+      .catch(() => {
+        // 取不到就維持 null，呼叫端的欄位保持空白——留給使用者手動輸入，
+        // 不要在這裡拋出讓整頁掛掉。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return today; // "YYYY-MM-DD"，載入完成前為 null
 }

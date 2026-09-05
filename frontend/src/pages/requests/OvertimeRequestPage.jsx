@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { createOvertimeRequest } from "../../api/requests.api";
+import { useVirtualToday } from "../../hooks/useVirtualClock";
 
 // 下班打卡較晚時，PunchOutConfirmDialog 選擇「申請加班」會帶著已完成打卡的
 // overtime_eligible_start／punch_out_time 導到這裡，直接預填表單（見 PunchPanel.jsx）。
@@ -40,6 +41,16 @@ export default function OvertimeRequestPage() {
   const [reason, setReason] = useState(location.state?.prefillReason ?? "");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 沒有從 PunchOutConfirmDialog 帶預填值進來時，日期欄位預設帶入展示用虛擬時鐘的
+  // 今天，避免使用者點開日期選擇器時被瀏覽器原生 UI 帶到真實現在的月份
+  // （見 docs/PITFALLS.md B6）。
+  const virtualToday = useVirtualToday();
+  useEffect(() => {
+    if (!virtualToday) return;
+    if (!startDate) setStartDate(virtualToday);
+    if (!endDate) setEndDate(virtualToday);
+  }, [virtualToday, startDate, endDate]);
 
   async function handleSubmit(event) {
     event.preventDefault();

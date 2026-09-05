@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 import OvertimeRequestPage from "./OvertimeRequestPage";
@@ -6,6 +6,15 @@ import OvertimeRequestPage from "./OvertimeRequestPage";
 vi.mock("../../api/requests.api", () => ({
   createOvertimeRequest: vi.fn(),
 }));
+
+const mockGetDemoClock = vi.hoisted(() => vi.fn());
+vi.mock("../../api/demo.api", () => ({
+  getDemoClock: (...args) => mockGetDemoClock(...args),
+}));
+
+beforeEach(() => {
+  mockGetDemoClock.mockReset().mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 08/24 09:00
+});
 
 function renderWithState(state) {
   return render(
@@ -17,10 +26,11 @@ function renderWithState(state) {
   );
 }
 
-test("沒有帶入 state 時欄位皆為空", () => {
+test("沒有帶入 state 時日期欄位預設帶入展示用虛擬時鐘的今天，不留空", async () => {
   renderWithState(undefined);
 
-  expect(screen.getByLabelText("開始日期")).toHaveValue("");
+  await waitFor(() => expect(screen.getByLabelText("開始日期")).toHaveValue("2026-08-24"));
+  expect(screen.getByLabelText("結束日期")).toHaveValue("2026-08-24");
   expect(screen.getByLabelText("加班事由")).toHaveValue("");
 });
 

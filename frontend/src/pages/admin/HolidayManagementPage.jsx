@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createHoliday, deleteHoliday, getHolidays } from "../../api/holidays.api";
 import RoleGate from "../../components/RoleGate";
+import { useVirtualToday } from "../../hooks/useVirtualClock";
 
 const inputClass =
   "rounded-lg border border-border-subtle bg-surface-900 px-2 py-1 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
@@ -17,6 +18,13 @@ function CreateHolidayForm({ onCreated }) {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isSubmittingRef = useRef(false);
+
+  // 日期欄位預設帶入展示用虛擬時鐘的今天，避免使用者點開日期選擇器時被瀏覽器
+  // 原生 UI 帶到真實現在的月份（見 docs/PITFALLS.md B6）。
+  const virtualToday = useVirtualToday();
+  useEffect(() => {
+    if (virtualToday && !holidayDate) setHolidayDate(virtualToday);
+  }, [virtualToday, holidayDate]);
 
   async function handleSubmit(event) {
     event.preventDefault();

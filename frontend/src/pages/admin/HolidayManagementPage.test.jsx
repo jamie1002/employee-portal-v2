@@ -11,6 +11,11 @@ vi.mock("../../api/holidays.api", () => ({
   deleteHoliday: (...args) => mockDeleteHoliday(...args),
 }));
 
+const mockGetDemoClock = vi.fn();
+vi.mock("../../api/demo.api", () => ({
+  getDemoClock: (...args) => mockGetDemoClock(...args),
+}));
+
 let mockUser = { id: 1, name: "系統管理者", role: "admin", permissions: [] };
 vi.mock("../../context/AuthContext", () => ({
   useAuth: () => ({ user: mockUser }),
@@ -23,6 +28,7 @@ beforeEach(() => {
   });
   mockCreateHoliday.mockReset();
   mockDeleteHoliday.mockReset();
+  mockGetDemoClock.mockReset().mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 08/24 09:00
 });
 
 test("非 admin 且無 holidays.manage 權限時完全不渲染", () => {
@@ -37,6 +43,13 @@ test("持有 holidays.manage 權限的一般員工也能看到頁面", async () 
   render(<HolidayManagementPage />);
 
   await waitFor(() => expect(screen.getAllByText("元旦").length).toBeGreaterThan(0));
+});
+
+test("日期欄位預設帶入展示用虛擬時鐘的今天，不留空", async () => {
+  render(<HolidayManagementPage />);
+  await waitFor(() => expect(screen.getAllByText("元旦").length).toBeGreaterThan(0));
+
+  await waitFor(() => expect(screen.getByLabelText("日期")).toHaveValue("2026-08-24"));
 });
 
 test("新增假日後依日期排序插入清單", async () => {

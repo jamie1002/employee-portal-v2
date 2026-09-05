@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { getHolidays } from "../../api/holidays.api";
 import { createLeaveRequest } from "../../api/requests.api";
 import { getSettings } from "../../api/settings.api";
+import { useVirtualToday } from "../../hooks/useVirtualClock";
 import { estimateLeaveHours } from "../../utils/leaveHours";
 
 // 後端 TIME 欄位序列化含秒（"09:00:00"），<input type="time"> 只吃 "HH:mm"。
@@ -33,6 +34,15 @@ export default function LeaveRequestPage() {
   const [isFullDay, setIsFullDay] = useState(false);
   const [settings, setSettings] = useState(null);
   const [holidayDates, setHolidayDates] = useState(new Set());
+
+  // 沒有查詢參數預填時，日期欄位預設帶入展示用虛擬時鐘的今天，避免使用者點開
+  // 日期選擇器時被瀏覽器原生 UI 帶到真實現在的月份（見 docs/PITFALLS.md B6）。
+  const virtualToday = useVirtualToday();
+  useEffect(() => {
+    if (!virtualToday) return;
+    if (!startDate) setStartDate(virtualToday);
+    if (!endDate) setEndDate(virtualToday);
+  }, [virtualToday, startDate, endDate]);
 
   const isReasonRequired = leaveType !== OPTIONAL_REASON_TYPE;
   const workHours = {
