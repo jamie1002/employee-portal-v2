@@ -2,6 +2,8 @@
 
 企業員工管理與出勤系統 —— 涵蓋打卡、請假／加班／補打卡申請與審核、場地借用、員工與部門管理、細粒度權限下放，並附完整的雲端部署設定與三層測試。
 
+**線上展示**：[employee-portal-v2-frontend.vercel.app](https://employee-portal-v2-frontend.vercel.app)（登入頁有一鍵代入的展示帳號，密碼統一 `Demo1234`）
+
 | 文件 | 用途 |
 | :--- | :--- |
 | [`SPEC.md`](SPEC.md) | 系統規格：權限矩陣、資料表、API 契約、業務規則、錯誤碼 |
