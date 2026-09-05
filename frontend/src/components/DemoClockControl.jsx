@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { setDemoClock } from "../api/demo.api";
 import { useVirtualClock } from "../hooks/useVirtualClock";
 
@@ -15,11 +15,34 @@ function formatDisplay(date) {
   }).format(date);
 }
 
+// <input type="datetime-local"> 沒有 value 時，瀏覽器的日期選擇器預設帶入真實的
+// 現在時間；虛擬時鐘的合法範圍卡在 2026-08-24 ~ 08-31，真實現在必然落在範圍外，
+// 選擇器就會夾到 max（08-31）——使用者看到的「每次都跳到 8 月 31 日」就是這個瀏覽
+// 器行為，不是我們的程式碼真的用了現在時間。用展示時間本身當預設值即可避免。
+function toDatetimeLocalValue(date) {
+  if (!date) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value;
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+}
+
 export default function DemoClockControl() {
   const virtualNow = useVirtualClock();
   const [draft, setDraft] = useState("");
   const [isApplying, setIsApplying] = useState(false);
   const [error, setError] = useState("");
+
+  // 只在欄位還沒被使用者動過（draft 是空字串）時，用展示時間補一次預設值；
+  // 使用者開始選別的時間之後就不再覆蓋，避免手動選好的值被下一次 tick 蓋掉。
+  useEffect(() => {
+    if (virtualNow && !draft) {
+      setDraft(toDatetimeLocalValue(virtualNow));
+    }
+  }, [virtualNow, draft]);
 
   async function handleApply() {
     if (!draft) return;

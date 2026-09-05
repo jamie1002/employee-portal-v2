@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd backend && python -m uvicorn app.main:app --reload --port 3000",
+    "dev:backend": "cd backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 3000",
     "dev:frontend": "npm run dev --workspace frontend",
     "db:migrate": "python backend/app/db_scripts/migrate.py",
     "db:seed": "python backend/app/db_scripts/seed.py",

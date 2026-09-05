@@ -36,6 +36,14 @@ test("輸入時間並套用會以台北時區組出 ISO 字串呼叫 setDemoCloc
   await waitFor(() => expect(window.location.reload).toHaveBeenCalled());
 });
 
+test("取得展示時間後自動帶入欄位並啟用套用按鈕，不會用瀏覽器的真實現在時間", async () => {
+  mockGetDemoClock.mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 09:00
+  render(<DemoClockControl />);
+
+  await waitFor(() => expect(screen.getByLabelText("調整展示時間")).toHaveValue("2026-08-24T09:00"));
+  expect(screen.getByRole("button", { name: "套用" })).not.toBeDisabled();
+});
+
 test("套用失敗時顯示錯誤訊息，不重新整理頁面", async () => {
   mockSetDemoClock.mockRejectedValue({ response: { data: { error: { message: "超出範圍" } } } });
   render(<DemoClockControl />);
