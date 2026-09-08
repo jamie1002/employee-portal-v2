@@ -17,10 +17,11 @@ def test_special_leave_days_table():
     assert special_leave_days(48) == 14
     assert special_leave_days(60) == 15
     assert special_leave_days(108) == 15
-    assert special_leave_days(120) == 15  # 滿 10 年整仍是 15，第 11 年起才開始 +1
-    assert special_leave_days(132) == 16  # 滿 11 年
-    assert special_leave_days(120 + 12 * 15) == 30  # 上限 30 天
-    assert special_leave_days(120 + 12 * 20) == 30
+    assert special_leave_days(120) == 16  # 滿 10 年起每年 +1（勞基法第 38 條）
+    assert special_leave_days(132) == 17  # 滿 11 年
+    assert special_leave_days(120 + 12 * 13) == 29  # 滿 23 年，上限前一級
+    assert special_leave_days(120 + 12 * 14) == 30  # 滿 24 年剛好觸及 30 日上限
+    assert special_leave_days(120 + 12 * 20) == 30  # 超過上限後不再增加
 
 
 def test_current_special_leave_period_before_six_months():

@@ -39,7 +39,10 @@ def special_leave_days(total_months: int) -> int:
         return 14
     if 5 <= years < 10:
         return 15
-    return min(15 + (years - 10), 30)
+    # 勞基法第 38 條「十年以上者，每一年加給一日，加至三十日為止」：
+    # 滿 10 年即為 16 日（不是與滿 5 年同為 15 日），故基準是 years - 9 而非 years - 10；
+    # 依此滿 24 年剛好觸及 30 日上限。
+    return min(15 + (years - 9), 30)
 
 
 def _add_months_clamped(d: date, months: int) -> date:
