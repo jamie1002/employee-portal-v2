@@ -379,3 +379,53 @@ Render 免費方案長時間無人使用後，第一次請求會有數十秒的�
    3. 驗收條件明確分兩欄：「自動化測試」與「人工對照規格逐句打勾」，兩者都過才算批次完成。
    4. 批次分派前，先做一張「規格章節 → 負責批次」對照表，拆完後檢查有沒有章節沒被任何批次認領到。
    5. 全部批次做完後，額外跑一次「規格覆蓋率」檢查：不看測試，逐一打開每個頁面對應的規格段落，跟實際畫面對照——這正是這次抓出這五項缺漏的方法，值得寫進流程變成標準動作，而不是靠使用者自己發現。
+
+---
+
+## I. AI 政策問答（批 A）
+
+### I1. `google-genai` 官方新 SDK 會破壞版本鎖定
+
+批 A 原計畫採 Google 官方新 SDK `google-genai`（理由：`google-generativeai` 已被 Google 宣告停止維護）。實測探針（乾淨 venv，先裝 `backend/requirements.txt` 鎖定版本，再疊裝候選 SDK，比對疊裝前後版本）發現：
+
+```
+pip install -r backend/requirements.txt   # pydantic==2.10.4
+pip install google-genai                  # 疊裝
+pip freeze | grep pydantic
+pydantic==2.13.5    # 被連帶升級
+```
+
+原因是 `google-genai==2.22.0` 的套件中繼資料明載 `Requires-Dist: pydantic<3.0.0,>=2.12.5`，這是硬性下限，不是安裝順序的偶然結果。**任何版本鎖定的專案在導入新的第三方 SDK 前，都必須先在乾淨環境跑一次「疊裝後 diff 版本」的探針**，不能只看套件自己的 changelog 是否提及相依變更——這類下限通常寫在 `pyproject.toml`／`METADATA` 裡，不會特別在文件裡強調。
+
+退回方案：`google-generativeai==0.8.6`（第一階段原型已實證可用），四項鎖定版本維持不變。副作用是 import 時會印出一句 `FutureWarning`（套件棄用警告），純粹是雜訊，不影響功能，不要因為看到這個警告就以為程式碼寫錯了。
+
+### I2. pgvector 需要換 Postgres 影像，不是裝一個 Python 套件就好
+
+`CREATE EXTENSION vector` 需要 Postgres 本身編譯時帶 pgvector（官方 `postgres:16` 影像沒有），必須換成 `pgvector/pgvector:pg16` 影像（本機 `docker-compose.yml` 兩個 service、CI 的 backend job 與 e2e job 兩個 Postgres service，**四個地方都要改**，漏一個就會在對應環境炸掉）。換影像後本機要 `docker compose up -d --force-recreate` 才會真的套用新影像（既有 volume 資料相容，不會遺失）。
+
+### I3. Neon 部署順序：先資料庫、後程式碼
+
+`push` 到 GitHub 觸發 Render 自動部署只會重建應用程式碼（同 G4），AI 政策問答額外多一個步驟：**忘了 ingest 是比忘了 migrate 更難發現的靜默失敗**——忘了 migrate 會直接拋「表不存在」的 500／503，容易被注意到；忘了 ingest 則是 `policy_embeddings` 表存在但是空的，AI 助理對每一題都正常回「查無相關規定」，**看起來像功能正常，其實答不出任何一題**。
+
+正確順序：
+
+```bash
+DATABASE_URL="<neon 連線字串>" npm run db:migrate
+GOOGLE_API_KEY="<key>" DATABASE_URL="<neon 連線字串>" npm run db:ingest
+```
+
+再驗證 `SELECT count(*) FROM policy_embeddings;`（應為 61 筆，四份語料切段後的總數）**必須大於 0**，才讓帶新程式碼的 PR 合併上線。緩解措施是 `/api/health` 回應新增了 `policy_chunk_count` 欄位，部署後看一眼健康檢查就知道語料灌了沒，不必額外下 SQL。
+
+### I4. ColdStartBanner 會誤導使用者以為 AI 助理是伺服器沒醒
+
+`api/client.js` 對所有請求做慢請求追蹤，超過 3 秒顯示「伺服器喚醒中」橫幅（見 G5）。但 AI 回答本來就常超過 3 秒（生成本身要 1～3 秒，疊上冷啟動可能數十秒），使用者會看到一個講伺服器冷啟動的橫幅，其實是模型在生成中——兩種完全不同的等待原因被同一個橫幅蓋住。
+
+解法是在 `client.js` 的 request interceptor 加一個 opt-in 旗標 `skipSlowRequestTracking`，`chat.api.js` 帶上它跳過追蹤；既有呼叫端都不帶這個旗標，行為不變。**這類「共用基礎設施要不要為新功能開一個例外」的決定，即使技術上是純新增、向下相容，也應該在 PR 說明或跟使用者確認後再動手**，不要因為改動小就默默決定——`client.js` 是每一支 API 呼叫都會經過的檔案，任何一個新旗標的語意都會變成之後所有功能的隱性契約。
+
+### I5. `RETRIEVAL_MIN_SCORE` 是綁死在一整組設定上的經驗值，不是隨便選的數字
+
+`0.65` 這個門檻只在「`gemini-embedding-001` + 768 維截斷 + 兩側 L2 正規化 + 不對稱 `task_type`」這一整組設定下有效。換模型、換維度、或改動正規化／`task_type` 策略中任何一項，這個值就作廢，必須重跑 `backend/eval/measure_min_score.py` 重新校準——**不要憑直覺調整這個數字**，門檻設太高會把真實問題的 top-1 也濾掉（症狀是使用者問正常問題卻被拒答），設太低則誘導題會大量進入生成階段（症狀是拒答品質完全依賴生成端的硬約束，检索層形同虛設）。
+
+### I6. 測試裡的假 embedding 向量要能精確算出餘弦相似度，不能隨手塞隨機數
+
+`RETRIEVAL_MIN_SCORE` 邊界（等於門檻 vs. 差一點點）這種測試，如果用隨機或憑感覺挑的向量，多半只能測到「大概在門檻附近」而測不到真正的邊界值——而且 pgvector 的 `vector` 型別是單精度浮點數，猜一個「理論上算出來就是某個門檻」的向量容易被儲存時的浮點捨入誤差打臉。做法是先以 `min_score=-1`（不過濾）向資料庫查一次實際分數，再把該分數原封不動設成門檻——這樣「等於門檻」的比較用的是同一個浮點數，不受精度影響，也不必手算餘弦相似度公式（見 `backend/tests/test_policy_retrieval.py`）。

@@ -30,6 +30,7 @@
 | 細粒度權限 | admin 可將國定假日／考勤設定／匯出報表個別下放給特定員工 |
 | 匯出報表 | 五種資料類型、欄位勾選、`.xlsx`，範圍 deny-by-default |
 | 展示機制 | 可調虛擬時鐘、展示資料一鍵重置與閒置自動重置 |
+| AI 助理 | 依公司政策文件（考勤規則、請假辦法、產品目錄、公司簡介）回答問題，RAG 架構、附引用來源，唯讀不碰個人資料 |
 
 ---
 
@@ -72,8 +73,9 @@ Neon.tech（PostgreSQL，Serverless）
 ### 技術棧
 
 - **後端**：Python 3.12、FastAPI、`asyncpg`（原生 SQL，無 ORM）、PyJWT、bcrypt、structlog、APScheduler、openpyxl
+- **LLM**：`google-generativeai==0.8.6`（AI 助理用，官方新 SDK `google-genai` 會破壞版本鎖定，見 `docs/PITFALLS.md` I1）
 - **前端**：React 19、Vite、React Router 7、Tailwind CSS v4（CSS-first）、axios、date-fns
-- **資料庫**：PostgreSQL 16
+- **資料庫**：PostgreSQL 16 + pgvector extension
 - **測試**：pytest（真實 Postgres）、Vitest + Testing Library、Playwright
 
 ---
@@ -90,6 +92,14 @@ pip install -r backend/requirements.txt
 npm run db:reset                              # migrate + seed
 npm run dev                                   # 前後端同時啟動
 ```
+
+**AI 助理功能**需另外設定 `GOOGLE_API_KEY`（`.env`，到 https://aistudio.google.com/apikey 申請）並跑一次 ingest（把政策文件切段、算 embedding 寫入資料庫，是唯一會呼叫 Gemini API 的批次作業）：
+
+```bash
+npm run db:ingest
+```
+
+留空 `GOOGLE_API_KEY` 不影響其他功能，AI 助理頁面會顯示「目前無法使用」並優雅降級（503 `CHAT_UNAVAILABLE`）。
 
 開啟 `http://localhost:5173`，用展示帳號登入：
 
@@ -108,9 +118,11 @@ npm run dev            # 前後端同時啟動
 npm run db:migrate     # 執行遷移
 npm run db:seed        # 寫入種子資料
 npm run db:reset       # migrate + seed（跑 e2e 前必做）
+npm run db:ingest      # AI 助理語料 embedding（唯一會呼叫 Gemini API 的批次作業，需 GOOGLE_API_KEY）
 npm run test:backend   # pytest
 npm run test:frontend  # Vitest
 npm run test:e2e       # Playwright
+npm run eval:chat      # AI 助理黃金題庫評估（72 題，需 GOOGLE_API_KEY，不進 CI）
 npm test               # 後端 + 前端
 ```
 
@@ -209,8 +221,10 @@ npm test               # 後端 + 前端
    ```bash
    DATABASE_URL="<neon-connection-string>" npm run db:migrate
    DATABASE_URL="<neon-connection-string>" npm run db:seed
+   GOOGLE_API_KEY="<key>" DATABASE_URL="<neon-connection-string>" npm run db:ingest
    ```
-3. **Render**：New → Blueprint → 選 repo（自動讀 `render.yaml`），填入 `DATABASE_URL`、`JWT_SECRET`（`openssl rand -base64 48` 自行產生）、`CORS_ORIGINS`（先填佔位）
+   `db:ingest` 這步**不能省略也不能延後**：忘了跑不會報錯，AI 助理會對每一題都正常回「查無相關規定」，看起來像功能正常，其實是語料是空的（見 `docs/PITFALLS.md` I3）。跑完驗證 `SELECT count(*) FROM policy_embeddings;` 應為 61 筆。
+3. **Render**：New → Blueprint → 選 repo（自動讀 `render.yaml`），填入 `DATABASE_URL`、`JWT_SECRET`（`openssl rand -base64 48` 自行產生）、`CORS_ORIGINS`（先填佔位）、`GOOGLE_API_KEY`（AI 助理用，留空則該功能優雅降級不影響其他頁面）
 4. **Vercel**：匯入同一個 repo，**Root Directory 設為 `frontend`**，環境變數 `VITE_API_BASE_URL` = `https://<render 網址>/api`
 5. 回 Render 把 `CORS_ORIGINS` 改成 Vercel 正式網址（不要有結尾斜線）
 6. 驗證：`curl https://<render>/api/health` 應回 `"database":"connected"`
@@ -219,6 +233,7 @@ npm test               # 後端 + 前端
 
 - **只改種子資料**：push → Render 自動部署 → 在畫面上點「重置展示資料」即可套用，不需手動下指令
 - **新增 migration**：push 不會自動更新資料庫，必須手動對正式庫執行一次 `DATABASE_URL="..." npm run db:migrate`，且要**先 migrate 再讓新程式碼上線**
+- **修改政策文件語料**（`db/policy_docs/*.md`）：push 不會自動重新 embedding，必須手動對正式庫執行一次 `GOOGLE_API_KEY="..." DATABASE_URL="..." npm run db:ingest`（只對內容有變的段落重算，不是全量重跑），並重新跑一次 `npm run eval:chat` 確認黃金題庫仍然全綠
 
 ---
 
@@ -240,3 +255,4 @@ CD 不另外寫部署腳本——Vercel 與 Render 都原生支援「接上 GitH
 - 「處理私人事務」的備註只寫入固定文字，不支援自訂內容
 - 展示環境的資料庫為所有訪客共用，會定期自動重置
 - 登入憑證存於 `localStorage`，可被同網域的 JavaScript 讀取。系統本身不使用任何略過安全轉義的渲染方式，但這仍是公開展示環境，請勿輸入真實個人敏感資訊
+- AI 助理**只回答公司政策文件範圍內的問題**，不查詢任何個人出勤／假別／申請資料（該功能規劃中，尚未實作）；語料為虛構示範內容，公司名稱與前端標題不一致（「暖丘生活」vs. Employee Portal），刻意不統一以保留 `content_hash` 與黃金題庫的有效性
