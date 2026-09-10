@@ -47,11 +47,17 @@ apiClient.interceptors.request.use((config) => {
 
   const requestId = ++requestSeq;
   config.__requestId = requestId;
-  const timerId = setTimeout(() => {
-    slowRequestIds.add(requestId);
-    notify();
-  }, SLOW_REQUEST_THRESHOLD_MS);
-  pendingTimers.set(requestId, timerId);
+
+  // opt-in：AI 助理的回答本來就常超過這個門檻（生成本身要 1～3 秒，冷啟動時更久），
+  // 硬套用這個計時器會顯示「伺服器喚醒中」橫幅，誤導成冷啟動、實際上是模型在生成。
+  // 既有呼叫端都不帶這個旗標，行為不變。
+  if (!config.skipSlowRequestTracking) {
+    const timerId = setTimeout(() => {
+      slowRequestIds.add(requestId);
+      notify();
+    }, SLOW_REQUEST_THRESHOLD_MS);
+    pendingTimers.set(requestId, timerId);
+  }
 
   return config;
 });

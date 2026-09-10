@@ -3,6 +3,7 @@ import AppShell from "./components/AppShell";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AttendancePage from "./pages/AttendancePage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
+import ChatPage from "./pages/ChatPage";
 import DashboardPage from "./pages/DashboardPage";
 import LeaveBalancePage from "./pages/LeaveBalancePage";
 import LoginPage from "./pages/LoginPage";
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/schema" element={<SchemaPage />} />
           <Route path="/exports" element={<ExportPage />} />
+          <Route path="/chat" element={<ChatPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
