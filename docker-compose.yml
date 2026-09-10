@@ -1,6 +1,10 @@
+# postgres-dev/postgres-test 兩個 service 都用 pgvector/pgvector:pg16（而非官方
+# postgres:16）：AI 政策問答功能需要 pgvector extension，換影像後需要
+# `docker compose up -d --force-recreate` 讓既有容器換上新影像（既有 volume 相容，
+# 資料不會遺失）。見 openspec/changes/add-policy-chat/design.md Decision 5。
 services:
   postgres-dev:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: employee-portal-v2-postgres-dev
     restart: unless-stopped
     environment:
@@ -20,7 +24,7 @@ services:
       retries: 10
 
   postgres-test:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: employee-portal-v2-postgres-test
     restart: unless-stopped
     environment:

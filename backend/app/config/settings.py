@@ -26,9 +26,28 @@ class AppSettings(BaseSettings):
     PORT: int = 3000
     ENVIRONMENT: str = "development"
 
+    # AI 政策問答（批 A）。留空即視為未啟用——GOOGLE_API_KEY 是唯一的啟用開關，
+    # 見 chat_enabled property 與 openspec/changes/add-policy-chat/design.md。
+    GOOGLE_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_REQUESTS_PER_MINUTE: float = 10
+    GEMINI_TIMEOUT_SECONDS: float = 25
+    EMBEDDING_MODEL: str = "models/gemini-embedding-001"
+    EMBEDDING_DIM: int = 768
+    RETRIEVAL_TOP_K: int = 5
+    # 綁死在「這個模型 + 768 維 + 兩側 L2 正規化 + 不對稱 task_type」這一整組設定上，
+    # 任一項變動即作廢，須重跑 backend/eval/measure_min_score.py 重新校準。
+    RETRIEVAL_MIN_SCORE: float = 0.65
+    CHAT_RATE_LIMIT_PER_MINUTE: int = 10
+    CHAT_MAX_QUESTION_CHARS: int = 500
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def chat_enabled(self) -> bool:
+        return bool(self.GOOGLE_API_KEY.strip())
 
     @model_validator(mode="after")
     def _forbid_open_cors_in_production(self) -> "AppSettings":

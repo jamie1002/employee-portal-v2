@@ -15,6 +15,7 @@ from app.routers import (
     admin_schema,
     attendance,
     auth,
+    chat,
     demo,
     departments,
     export,
@@ -79,3 +80,4 @@ app.include_router(settings.router, prefix="/api")
 app.include_router(admin_schema.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(demo.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")

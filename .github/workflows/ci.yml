@@ -15,8 +15,11 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     services:
+      # pgvector/pgvector:pg16（非官方 postgres:16）：AI 政策問答功能的
+      # policy_embeddings 表需要 vector extension。e2e job 的 postgres service 也要
+      # 同步改，漏改的話 npm run db:reset 會在 CI 掛掉（見 add-policy-chat design.md）。
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -57,7 +60,7 @@ jobs:
     needs: [backend, frontend]
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
