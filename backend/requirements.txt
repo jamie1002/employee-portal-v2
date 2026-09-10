@@ -10,6 +10,12 @@ structlog==24.4.0
 APScheduler==3.11.0
 openpyxl==3.1.5
 
+# AI 政策問答（批 A）。探針日期 2026-09-10：候選 google-genai 未通過 Gate 1
+# （硬性要求 pydantic>=2.12.5，會破壞上面鎖定的 pydantic==2.10.4），退回這個已停止
+# 維護但版本相容的套件；import 時的 FutureWarning 是套件本身的棄用警告，不是本專案
+# 的程式錯誤（見 openspec/changes/add-policy-chat/design.md Decision 1）。
+google-generativeai==0.8.6
+
 pytest==8.3.4
 pytest-asyncio==0.25.1
 pytest-timeout==2.3.1

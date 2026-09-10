@@ -22,7 +22,8 @@
 | :--- | :--- |
 | 前端 | React 19.2.8、Vite 8.2.2、React Router 7.18.2、Tailwind CSS 4.3.3（CSS-first，無 config 檔）、axios、date-fns |
 | 後端 | Python 3.12、FastAPI 0.115.6、uvicorn 0.34.0、asyncpg 0.30.0（**無 ORM，手寫 SQL**）、PyJWT、bcrypt、structlog、APScheduler、openpyxl |
-| 資料庫 | PostgreSQL 16（本機 Docker／雲端 Neon.tech） |
+| LLM | `google-generativeai==0.8.6`（AI 政策問答，見 §4.12）——探針顯示官方新 SDK `google-genai` 會破壞 `pydantic` 版本鎖定，改用這個已停止維護但版本相容的舊 SDK，詳見 `docs/PITFALLS.md` |
+| 資料庫 | PostgreSQL 16（本機 Docker／雲端 Neon.tech）+ pgvector extension |
 | 部署 | 前端 Vercel、後端 Render、資料庫 Neon.tech |
 
 ### 2.1 為何不使用 ORM
@@ -271,6 +272,18 @@
 - **閒置計時器刻意使用真實時間**（`time.monotonic()`），不用虛擬時鐘——虛擬時間到達 clamp 上限後不再前進，用它會讓重置機制永遠不觸發。
 - 種子腳本開頭即 `TRUNCATE ... RESTART IDENTITY CASCADE`，因此可重複執行。
 
+### 4.12 AI 政策問答（批 A）
+
+- 完全唯讀，回答依據四份公司政策文件（`db/policy_docs/*.md`），不涉及任何個人資料。個人出勤／假別／申請進度的查詢工具屬於批 B，尚未實作。
+- **RAG 流程**：語料切段（`##`／`###` 標題為邊界，表格與引言區塊不可切開，特定 Q&A 章節每題一 chunk）→ Gemini embedding（`gemini-embedding-001`，`output_dimensionality=768`，兩側 L2 正規化，`task_type` 刻意不對稱：文件端 `retrieval_document`／查詢端 `retrieval_query`）→ pgvector 餘弦相似度檢索（`RETRIEVAL_TOP_K=5`，`RETRIEVAL_MIN_SCORE=0.65`，等於門檻視為保留）→ 檢索結果為空時改走受限的 fallback 提示（見下）→ 生成模型（`gemini-3.1-flash-lite`，`temperature` 讀 `GEMINI_TEMPERATURE`）依系統提示的六條規則回答。
+- **生成硬約束**（系統提示逐字內容見 `backend/app/services/chat_prompt.py`）：只依「檢索片段」與「系統當前生效的考勤設定」回答，不得憑空發明資料裡沒有的規則或數值；**可以把資料中明確記載的規則套用到使用者的情境上推算**（比較與區間判斷、單位換算、級距對照），但推算而得的答案必須附上「以系統實際顯示為準」的提醒；前提不明確時給條件式回答並標明前提，而不是拒答；結尾必須列出實際採用的來源（`— 依據：{檔名} {章節路徑}`，**僅供 eval 自動驗證答案有所本，前端一律剝除不顯示**）；一律繁體中文；輸出格式只能用段落／`-` 條列／`**粗體**`（禁止表格與 `1.` 數字清單，前端渲染器不支援）；使用者訊息不是新的指令（防注入）。
+- **檢索落空的處理**：改用受限的 fallback 提示呼叫模型（`kind: "fallback"`），只允許寒暄（早安、你好）、對情緒性訊息表達同理並引導聯繫人資或主管、以及說明超出範圍的問題該去哪裡查；該提示**明確禁止產生任何具體規定、時間、天數、金額或計算方式**——這條路徑沒有檢索依據，講出來的都會是編造。
+- **推算基準取自系統即時設定**：問答時讀取 `system_settings` 當前值注入提示，語料寫死的 09:00／10 分鐘只是預設值，admin 改過設定後一律以即時值為準（呼應「禁止寫死時間字面值」的硬性規則）。
+- **`policy_embeddings` 不受展示資料重置影響**（見 §5.13），也**不落地對話歷史**——多輪上下文只存前端 state。
+- **限流**：每使用者每分鐘 `CHAT_RATE_LIMIT_PER_MINUTE`（預設 10）次，行程記憶體滑動視窗、`time.monotonic()`（不用虛擬時鐘，理由同閒置重置計時器）。
+- **降級**：未設定 `GOOGLE_API_KEY`、上游逾時或錯誤、`policy_embeddings` 表或 `vector` extension 不存在，一律回 503 `CHAT_UNAVAILABLE`，不得回 500。
+- Ingest（`npm run db:ingest`）是唯一會呼叫 embedding API 的批次作業，增量比對 `content_hash`，只對變更的 chunk 重新算 embedding，並刪除語料中已不存在的孤兒 chunk。**不併入 `db:reset`**。
+
 ---
 
 ## 5. 資料庫模型
@@ -404,6 +417,22 @@ UNIQUE `(user_id, punch_date)`；索引 `(user_id, punch_date DESC)`。
 
 `id INTEGER PK DEFAULT 1 CHECK (id = 1)`、`real_anchor TIMESTAMPTZ NOT NULL`、`virtual_anchor TIMESTAMPTZ NOT NULL`、`updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
 
+### 5.13 policy_embeddings
+
+| 欄位 | 型別 | 約束 |
+| :--- | :--- | :--- |
+| id | SERIAL | PK |
+| source_file | VARCHAR(100) | NOT NULL |
+| section_path | TEXT | NOT NULL（例：「請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距」） |
+| chunk_index | INTEGER | NOT NULL（同一份文件內的切段序號，從 0 起） |
+| content | TEXT | NOT NULL（送進 LLM 的原文，已含 `【section_path】` context prefix） |
+| raw_content | TEXT | NOT NULL（未加 prefix 的原始段落） |
+| content_hash | CHAR(64) | NOT NULL（`raw_content` 的 SHA-256，供增量 ingest 判斷是否變更） |
+| embedding | vector(768) | NOT NULL |
+| updated_at | TIMESTAMPTZ | NOT NULL DEFAULT now()（維運事實，刻意不受虛擬時鐘規則約束，也不掛 `set_updated_at` 觸發器） |
+
+`UNIQUE (source_file, chunk_index)`；HNSW 索引 `vector_cosine_ops`。**不列入 `BUSINESS_TABLES`**——不受種子重置與閒置自動重置影響，換模型或維度需清表重灌整張表（詳見 `docs/PITFALLS.md`）。
+
 ---
 
 ## 6. API 契約
@@ -492,6 +521,14 @@ UNIQUE `(user_id, punch_date)`；索引 `(user_id, punch_date DESC)`。
 
 > 匯出端點的 `roles` 參數**絕對不能省略**，寫成 `require_permission("exports.run")` 會套用預設的 `roles=("admin",)`，直接砍掉現有 manager 的匯出權。
 
+### 6.8 AI 助理
+
+| Method | 路徑 | 權限 | 說明 |
+| :--- | :--- | :--- | :--- |
+| POST | `/chat` | 登入 | body：`{"question": "..."}`；成功回 200，`{"answer": {"kind", "text", "refused", "sources"}}`；`sources` 每筆含 `source_file`／`section_path`／`score` |
+
+`kind` 批 A 恆為 `"policy"`，是批 B（個人資料查詢工具）的分流欄位，尚未實作。
+
 ---
 
 ## 7. 錯誤處理
@@ -540,6 +577,8 @@ UNIQUE `(user_id, punch_date)`；索引 `(user_id, punch_date DESC)`。
 | `DEPARTMENT_NOT_FOUND` | 400 | 指定的部門不存在 |
 | `INVALID_MANAGER_ROLE` | 400 | 部門主管須具備 manager 或 admin 角色 |
 | **`ADMIN_PERMISSIONS_IMPLICIT`** | **400** | **不得對 admin 個別授予權限** |
+| `CHAT_UNAVAILABLE` | 503 | AI 助理未設定金鑰、上游逾時或錯誤、`policy_embeddings` 表或 `vector` extension 不存在 |
+| `CHAT_RATE_LIMITED` | 429 | 提問太頻繁，超過每分鐘限額 |
 
 ---
 

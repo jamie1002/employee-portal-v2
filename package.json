@@ -12,10 +12,12 @@
     "db:migrate": "python backend/app/db_scripts/migrate.py",
     "db:seed": "python backend/app/db_scripts/seed.py",
     "db:reset": "python backend/app/db_scripts/reset.py",
+    "db:ingest": "python backend/app/db_scripts/ingest_policies.py",
     "test:backend": "cd backend && python -m pytest -q",
     "test:frontend": "npm run test --workspace frontend -- run",
     "test:e2e": "playwright test",
-    "test": "npm run test:backend && npm run test:frontend"
+    "test": "npm run test:backend && npm run test:frontend",
+    "eval:chat": "cd backend && python -m eval.run_eval"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

@@ -1,0 +1,709 @@
+# 黃金題庫（`SPEC.md` §7.1、`TASKS.md` 批 5）
+#
+# 設計原則：
+# 1. **先寫題庫、再看結果**。每一題的 expected_section_path 都是「讀語料判斷答案該在哪一節」
+#    寫出來的，不是「跑完檢索看回傳什麼就填什麼」——後者會讓 eval 永遠 100% 但毫無意義。
+# 2. **涵蓋每一個章節**：四份語料切出 61 個 chunk、54 個不同的 section_path，
+#    每一個 section_path 都至少有一題（`SPEC.md` §7.2 第 2 點）。Q&A 章節的每一題問答對
+#    各自有一題對應。
+# 3. **數字型題目一律不手填期望值**：以 expected_number 宣告要呼叫 employee-portal-v2 的
+#    哪一個業務函式、帶什麼參數，由 `run_eval.py` 執行時即時算出（`SPEC.md` §7.1 最後一項）。
+#    語料被改壞或 v2 規則變更時，eval 會立刻紅。
+#
+# 欄位說明：
+#   question              必填。使用者可能會問的問題。
+#   expected_section_path 期望命中的章節路徑；誘導題若語料完全沒有對應章節則留空（null）。
+#   expected_points       期望答案要點（人工／AI 逐句對照用，也是批 6 生成端的驗收依據）。
+#   expect_refusal        true 代表這是誘導題，期望機器人明確拒答／說明不在文件範圍。
+#   expected_number       數字型題目的 ground truth 來源宣告：
+#     function              special_leave_days | calculate_leave_hours
+#     kwargs                傳給該函式的參數（時間一律台北時區，落在展示視窗 2026-08-24～08-31）
+#     unit                  單位（用來組出「{值} {單位}」字串，例如「14 日」「5 小時」）
+#     in_corpus             這個數字**有沒有**白紙黑字寫在語料裡。兩種值的檢查方向相反：
+#       true  → 語料寫死了這個數字。eval 會檢查 (a) 語料與 v2 函式算出來的一致、
+#               (b) 機器人的回答有把這個數字講出來。
+#       false → 語料沒有寫這個數字，要得到它必須自己做算術。依 `SPEC.md` §6.2 硬約束第 2 條，
+#               機器人**不得自行計算未出現在文件中的數字**，所以 eval 反過來要求
+#               **回答裡不可以出現這個數字**——出現就代表它自己算了，是本專案最危險的失敗模式。
+
+questions:
+  # ==========================================================
+  # attendance-rules.md — 出勤與申請作業規則（20 個 section_path）
+  # ==========================================================
+  - question: "「應到班時間」跟「表定上班時間」有什麼不一樣？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 1. 名詞定義"
+    expected_points:
+      - "應到班時間預設等於表定上班時間 09:00"
+      - "當天若有從表定上班時間起連續涵蓋的已核准請假，會往後推到請假結束時間"
+      - "上午請半天假的人，當天應到班時間是 13:00 而不是 09:00"
+
+  - question: "工作日幾點打卡才算遲到？判定是算到秒還是算到分？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.1 上班打卡與遲到判定"
+    expected_points:
+      - "打卡時間小於等於應到班時間加緩衝為準時（normal），超過即為遲到（late）"
+      - "判定粒度是分鐘不是秒，09:10:00 與 09:10:59 結果相同"
+      - "09:11:00 才算遲到"
+
+  - question: "下班打卡有沒有緩衝時間可以用？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.2 緩衝只作用在到班這一端"
+    expected_points:
+      - "緩衝時間只用在上班端，下班端完全不適用"
+      - "這是刻意的不對稱設計"
+
+  - question: "09:05 才到班的話，當天的午休時間會變成幾點到幾點？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.3 浮動午休"
+    expected_points:
+      - "午休區間隨到班偏移量同步平移，09:05 到班則午休為 12:05–13:05"
+      - "平移量夾在正負緩衝之內"
+      - "請假時數計算的午休固定不浮動，與出勤打卡的浮動午休刻意不同"
+
+  - question: "當天的正常工時結束時間是怎麼算出來的？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.4 正常工時結束時間"
+    expected_points:
+      - "取封頂式與累積式兩者的較小者"
+      - "封頂式＝表定下班時間＋到班偏移量"
+      - "累積式＝工時起算點＋當日應工時＋午休長度－當日已核准請假時數"
+
+  - question: "早退有沒有寬限？只早 1 分鐘下班算不算早退？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.5 早退判定"
+    expected_points:
+      - "早退沒有任何寬限，早 1 分鐘就是早退"
+      - "表定下班 18:00、09:00 準時上班時，17:55 打下班卡一樣算早退"
+      - "遲到與早退是兩個獨立判定，可以同時成立"
+
+  - question: "超過正常工時結束時間之後多留的那段時間，會算進當日工時嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.6 當日工時計算"
+    expected_points:
+      - "超過正常工時結束時間的部分不計入當日工時"
+      - "要認列必須另外送加班申請"
+      - "工時保留到小數點後兩位"
+
+  - question: "忘記打下班卡的話，系統會自動幫我補嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.7 忘記打下班卡"
+    expected_points:
+      - "系統不會自動補"
+      - "會被標記為「缺下班打卡」"
+      - "請走補打卡申請"
+
+  - question: "整天完全沒有出勤紀錄的日子，系統會怎麼處理？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.8 整天沒有紀錄"
+    expected_points:
+      - "排程每 6 小時執行一次，回溯 60 天"
+      - "當天完全沒有紀錄時自動補一筆狀態為缺勤（absent）的紀錄"
+      - "已有紀錄的日子不會被覆蓋"
+
+  - question: "補打卡核准之後，原本的打卡時間會被直接改掉嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.9 已核准的請假與補打卡不會改寫原始打卡紀錄"
+    expected_points:
+      - "系統只保存原始打卡事實，補打卡與請假核准不覆寫原始紀錄"
+      - "查詢時即時算出生效值（生效上下班時間、狀態、工時、早退）"
+      - "只要當天有任何狀態的申請就會標示為「有異動」，即使最後被駁回也一樣"
+
+  - question: "同一天可以送出第二筆補打卡申請嗎？可以補未來的日期嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 3. 補打卡申請"
+    expected_points:
+      - "同一天已有待審核或已核准的補打卡申請時，不得再送出第二筆"
+      - "補打卡的目標日期不得為未來日期，只能補今天或今天以前"
+      - "審核流程與請假相同，駁回必須填寫理由"
+
+  - question: "加班 2 小時 29 分可以認列幾小時？未滿 30 分鐘的加班可以送申請嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.1 時數計算"
+    expected_points:
+      - "加班時數以 30 分鐘為單位無條件捨去，2 小時 29 分認列 2 小時"
+      - "未滿 30 分鐘的加班無法送出申請，系統會直接擋下"
+      - "先扣除與表定午休（12:00–13:00）的重疊再捨去"
+
+  - question: "09:00 準時上班、當天沒請假的話，加班最早可以從幾點開始申請？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.2 最早可申請的起算時間"
+    expected_points:
+      - "工作日的加班可認列起點＝正常工時結束時間再加 30 分鐘休息"
+      - "正常工時結束為 18:00 時，加班最早只能從 18:30 開始申請"
+      - "那 30 分鐘休息是法規層級的規則，管理者無法調整"
+
+  # 誘算題：語料只寫了規則與兩個既有範例（1 小時 50 分→1.5、2 小時 29 分→2），
+  # 沒有 45 分鐘這個案例。要答出 0.5 必須自己套規則算，依 SPEC §6.2 硬約束 2 應拒答。
+  # 這題是批 6 人工驗收第 7 輪抓到的真實缺陷，補進題庫防止回歸（見踩坑記錄 P13）。
+  - question: "我加班了 45 分鐘，可以認列幾小時？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.1 時數計算"
+    expected_points:
+      - "複述規則：加班時數以 30 分鐘為單位無條件捨去"
+      - "依規則推算出 0.5 小時並直接回答（規則與單位都寫在語料裡，屬於可推算範圍）"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_overtime_hours
+      kwargs: {start: "2026-08-24T18:30:00", end: "2026-08-24T19:15:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "當天有一筆待審核的補打卡申請時，還可以送加班申請嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.3 與其他申請的互斥"
+    expected_points:
+      - "當天只要有任何一筆待審核的請假或補打卡申請，就不能送出加班申請"
+      - "必須等該筆申請審核完成（核准或駁回）之後才能申請"
+      - "原因是請假與補打卡會改變當日的正常工時結束時間，也就改變加班的起算基準"
+
+  - question: "主管可以審核自己送出的申請嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 5. 申請單審核（三類共通）"
+    expected_points:
+      - "主管不得審核自己送出的申請"
+      - "系統管理者因為是系統唯一管理者、沒有代理人可審，不受此限"
+      - "駁回必須填寫審核備註"
+
+  - question: "09:00–11:00 跟 11:00–12:00 這兩筆場地預約算不算時段衝突？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 6. 場地借用"
+    expected_points:
+      - "預約時段採半開區間，首尾相接不算衝突，可以連續預約"
+      - "時段重疊時系統會擋下並顯示衝突時段與預約人姓名"
+      - "預約不得跨日；僅本人可取消自己的預約，系統管理者可強制釋放"
+
+  - question: "系統會自動抓取政府公告的國定假日行事曆嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 7. 國定假日"
+    expected_points:
+      - "系統不會自動抓取，需要於年初手動建立當年度資料"
+      - "由人資部或持有「國定假日管理」權限者依政府公告行事曆維護"
+      - "任何角色都可以查詢國定假日清單"
+
+  - question: "部門主管看得到其他部門同仁的申請紀錄嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 8. 誰看得到什麼"
+    expected_points:
+      - "每個人只看得到自己的出勤與申請紀錄"
+      - "主管額外看得到所屬部門同仁的申請，跨部門一律不可見"
+      - "系統管理者可檢視全公司紀錄，並可將特定功能個別下放"
+
+  - question: "系統顯示的「現在」是伺服器的真實時間嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 9. 展示環境的時間基準"
+    expected_points:
+      - "不是真實時間，是可由任何登入者調整的展示用虛擬時鐘"
+      - "範圍固定在 2026-08-24 ～ 2026-08-31，超出範圍會自動夾回邊界"
+      - "所有出勤判定與配額計算一律以虛擬時鐘為準，不得使用真實世界日期"
+
+  - question: "出勤與申請作業規則的權威來源，對應 employee-portal-v2 SPEC 的哪幾節？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 10. 延伸文件"
+    expected_points:
+      - "出勤／請假／加班／場地規則的權威來源是 employee-portal-v2/SPEC.md §4.1～§4.6"
+      - "系統目前生效的工時設定看 employee-portal-v2 資料庫的 system_settings 資料表"
+
+  # ==========================================================
+  # company-profile.md — 公司簡介（8 個 section_path）
+  # ==========================================================
+  - question: "暖丘生活是哪一年成立的？總部設在哪裡？"
+    category: policy
+    expected_section_path: "公司簡介 > 1. 公司基本資料"
+    expected_points:
+      - "2019 年 3 月成立"
+      - "總部在台北市"
+      - "產業別為玩具與服飾自有品牌零售電商"
+
+  - question: "公司名稱 Warm Hill 是什麼意思？永續材質具體用了哪些？"
+    category: policy
+    expected_section_path: "公司簡介 > 2. 成立初衷與核心業務"
+    expected_points:
+      - "Warm Hill 取自午後山丘上曬太陽、卸下防備的放鬆感"
+      - "玩具線導入海洋回收塑膠再製零件與 FSC 認證木料"
+      - "服飾線提高回收聚酯纖維（rPET）與有機棉的採用比例"
+
+  - question: "研發部負責哪些業務？"
+    category: policy
+    expected_section_path: "公司簡介 > 2. 成立初衷與核心業務 > 部門分工"
+    expected_points:
+      - "玩具與服飾的產品設計與打樣"
+      - "材質開發，含回收與永續原料評估導入"
+      - "安全與品質檢驗"
+
+  - question: "公司的願景（Vision）是什麼？"
+    category: policy
+    expected_section_path: "公司簡介 > 3. 公司文化 > 願景（Vision）"
+    expected_points:
+      - "讓每個孩子的童年都留有一段被玩具好好陪伴的記憶"
+      - "讓還在尋找自己風格的年輕人穿得起、也穿得住喜歡的樣子"
+
+  - question: "公司的使命（Mission）怎麼描述？"
+    category: policy
+    expected_section_path: "公司簡介 > 3. 公司文化 > 使命（Mission）"
+    expected_points:
+      - "用同理心設計制度、用透明的規則取代口頭默契"
+      - "讓每一位夥伴在被信任、被尊重的環境裡把玩具和衣服做好"
+
+  - question: "公司的三大文化支柱是哪三個？"
+    category: policy
+    expected_section_path: "公司簡介 > 3. 公司文化 > 三大文化支柱"
+    expected_points:
+      - "以人為本"
+      - "扁平化溝通"
+      - "開放氛圍"
+
+  - question: "行為準則裡講的「對事不對人」具體是什麼意思？"
+    category: policy
+    expected_section_path: "公司簡介 > 3. 公司文化 > 行為準則"
+    expected_points:
+      - "吵的是「這件事哪裡出了問題」，不是「這是誰的錯」"
+      - "覺得哪個決定怪怪的可以直接講，不會因為講真話被記一筆"
+
+  - question: "公司簡介這份文件把出勤系統行為規則的權威來源指到哪裡？"
+    category: policy
+    expected_section_path: "公司簡介 > 4. 延伸文件"
+    expected_points:
+      - "出勤系統行為規則的權威來源是 employee-portal-v2/SPEC.md"
+      - "在售商品看 product-catalog.md、請假福利看 leave-policy.md、出勤規則看 attendance-rules.md"
+
+  # ==========================================================
+  # leave-policy.md — 請假辦法及福利制度（15 個 section_path）
+  # ==========================================================
+  - question: "公司的上下班時間跟午休時間是幾點到幾點？每日標準工時多少？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 1. 標準工時與出勤時間"
+    expected_points:
+      - "上班 09:00、下班 18:00、午休 12:00–13:00"
+      - "遲到／早到緩衝 10 分鐘"
+      - "每日標準工時 8 小時（09:00–18:00 扣除 1 小時午休）"
+
+  - question: "在緩衝時間內晚到，當天的午休跟正常工時結束時間會跟著調整嗎？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 1. 標準工時與出勤時間 > 1.1 緩衝只作用在「到班」這一端"
+    expected_points:
+      - "晚到在緩衝內不算遲到，午休與正常工時結束時間同步往後平移相同分鐘數"
+      - "早到在緩衝內則同步往前平移"
+      - "早退沒有任何寬限，緩衝完全不適用於下班端"
+
+  - question: "08:48 上班、12:48 下班，當天工時會算成幾小時？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 1. 標準工時與出勤時間 > 1.2 提早到班超過緩衝的部分不計入工時"
+    expected_points:
+      - "工時起算點被墊高到 08:50，當日工時 3.00 小時"
+      - "不是把提早的 12 分鐘也算進去的 3.20 小時"
+      - "想認列這段時間要改走加班申請"
+
+  - question: "公司有哪幾種假別？事假跟病假一年各有幾天？哪一種可以不填事由？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度"
+    expected_points:
+      - "四種假別：特別休假、事假、病假、公假"
+      - "事假每年 14 日、病假每年 30 日，均為曆年制；公假不限額度"
+      - "只有特別休假可以不填事由，且採到職週年制"
+
+  - question: "到職滿 3 年可以有幾天特別休假？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "依到職週年制、勞動基準法第 38 條級距表計算"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 36}
+      unit: "日"
+      in_corpus: true
+      expect_stated: required
+
+  - question: "到職剛滿 6 個月有特休嗎？有的話幾天？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "滿 6 個月起才有特別休假額度"
+      - "未滿 6 個月的新進夥伴尚無特休，急迫需求可先申請事假或病假"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 6}
+      unit: "日"
+      in_corpus: true
+      expect_stated: required
+
+  - question: "到職滿 12 年的話特休有幾天？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "滿 10 年起每滿 1 年加給 1 日：滿 10 年 16 日、滿 11 年 17 日、滿 12 年 18 日"
+      - "加至 30 日為止，滿 24 年達到上限"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 144}
+      unit: "日"
+      in_corpus: true
+      expect_stated: required
+
+  # 誘算題：語料的級距表列到「11 年起每滿 1 年 +1 日」，註解舉例到滿 12 年 18 日與滿 24 年上限，
+  # 但沒有列出滿 20 年。要答出 26 日必須自己推算，依 SPEC §6.2 硬約束 2 應拒答。
+  - question: "我到職滿 20 年了，特別休假有幾天？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "複述規則：滿 10 年起每滿 1 年加給 1 日，至 30 日為止"
+      - "依規則推算出 26 日並直接回答（級距規則與 30 日上限都寫在語料裡，屬於可推算範圍）"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 240}
+      unit: "日"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "請假時數是怎麼算的？多天請假中間的完整工作日也會套用緩衝嗎？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 3. 請假時數試算規則"
+    expected_points:
+      - "逐工作日計算後加總，先排除週末與國定假日"
+      - "緩衝只在整段請假真正的頭尾兩端生效，中間完整工作日一律用表定 09:00–12:00、13:00–18:00"
+      - "請假期間的午休固定以表定 12:00–13:00 認定，不浮動"
+
+  - question: "上午請假 09:00 到 12:00，會被認列幾小時？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 3. 請假時數試算規則"
+    expected_points:
+      - "系統認列 3 小時假，下午 13:00 之後正常出勤不受影響"
+    expected_number:
+      function: calculate_leave_hours
+      kwargs: {start: "2026-08-24T09:00:00", end: "2026-08-24T12:00:00"}
+      unit: "小時"
+      in_corpus: true
+      expect_stated: required
+
+  - question: "請假申請被駁回的時候，審核的人一定要寫理由嗎？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 4. 請假申請與審核流程"
+    expected_points:
+      - "審核結果為核准或駁回二擇一，駁回必須填寫理由"
+      - "由所屬部門主管審核，部門未指派主管時一律由系統管理者審核"
+      - "已審核完成的申請不得重複審核或逕自更改"
+
+  - question: "請假天數要自己先扣掉國定假日嗎？國定假日是誰維護的？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 5. 國定假日"
+    expected_points:
+      - "不需要自行扣除，請假與加班時數試算會自動排除國定假日"
+      - "由人資部依中華民國政府公告年度行事曆維護於系統中"
+
+  - question: "我今天早上 09:05 才打卡上班，下午想請假，該怎麼申請？當天會被判定早退嗎？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 6. 常見情境 Q&A"
+    expected_points:
+      - "選擇當天 13:00–18:00 為起訖時間、選假別並填事由，送出後由主管審核"
+      - "09:05 未超過遲到判定門檻 09:10，仍判定為準時"
+      - "12:05 打下班卡不會被判定早退，因為正常工時結束時間已把請假時數扣掉"
+    expected_number:
+      function: calculate_leave_hours
+      kwargs: {start: "2026-08-24T13:00:00", end: "2026-08-24T18:00:00"}
+      unit: "小時"
+      in_corpus: true
+      expect_stated: required
+
+  - question: "半天的特別休假需要填寫事由嗎？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 6. 常見情境 Q&A"
+    expected_points:
+      - "不需要"
+      - "四種假別中只有特別休假可以不填事由，事假、病假、公假皆為必填"
+
+  - question: "我請週五到下週一的假，週末會被算進請假時數裡嗎？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 6. 常見情境 Q&A"
+    expected_points:
+      - "不會，系統逐工作日計算，週末與國定假日一律自動排除"
+      - "只有頭尾兩端的工作日才套用緩衝，中間完整工作日用表定時間計算"
+      - "前提不明確（不知道是哪一週、中間有沒有國定假日），講出具體時數時要標明前提；不講具體數字也可以"
+    expected_number:
+      function: calculate_leave_hours
+      kwargs: {start: "2026-08-28T09:00:00", end: "2026-08-31T18:00:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: optional
+
+  - question: "申請被主管駁回了，接下來我可以做什麼？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 6. 常見情境 Q&A"
+    expected_points:
+      - "駁回一定會附上理由，可依理由修改申請內容後重新送出一筆新的申請"
+      - "已駁回的申請本身不能被重新審核或修改"
+
+  - question: "今天已經有一筆待審核的請假申請了，還可以再申請加班嗎？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 6. 常見情境 Q&A"
+    expected_points:
+      - "不行，當天有任一筆待審核的請假或補打卡申請就不能送出加班申請"
+      - "需等該筆申請審核完成（核准或駁回）後才能申請"
+
+  - question: "公司規劃福利制度的原則是什麼？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 7. 福利制度"
+    expected_points:
+      - "好的福利制度應該讓每一位夥伴一看就懂、一問就有答案"
+      - "各項目皆訂有明確的資格與金額，不設「另行公告」的模糊事項"
+
+  - question: "團體保險什麼時候開始投保？眷屬可以一起加保嗎？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 7. 福利制度 > 7.1 保險與退休"
+    expected_points:
+      - "到職滿 3 個月起，公司額外投保團體意外險與住院醫療險"
+      - "眷屬可自費加保"
+      - "到職當日起投保勞保、健保，公司依法提撥勞退金 6%"
+
+  - question: "三節獎金怎麼發放？年度調薪什麼時候檢視？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 7. 福利制度 > 7.2 獎金與加薪"
+    expected_points:
+      - "三節獎金於農曆春節、端午、中秋依到職年資按比例發放"
+      - "年終獎金依營運狀況與個人績效評核，於農曆春節前發放"
+      - "每年第一季進行績效考核，作為調薪與晉升參考"
+
+  - question: "教育訓練補助每人每年上限多少錢？有什麼條件？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 7. 福利制度 > 7.3 教育訓練與職涯"
+    expected_points:
+      - "每人每年上限 NT$ 15,000"
+      - "需與現職業務相關且事前簽核"
+      - "內部技術／業務分享會每季至少一場"
+
+  - question: "到職滿 8 個月的人參加員工旅遊，公司補助多少？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 7. 福利制度 > 7.4 其他福利"
+    expected_points:
+      - "滿 6 個月以上、未滿 1 年：補助本人費用 50%"
+      - "滿 1 年（含）以上為全額補助本人費用，未滿 6 個月尚未列入補助對象"
+
+  - question: "請假辦法的權威來源對應 employee-portal-v2 SPEC 的哪幾節？系統目前生效的工時設定要去哪裡看？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 8. 延伸文件"
+    expected_points:
+      - "出勤／請假／加班規則權威來源為 employee-portal-v2/SPEC.md §4.1～§4.5"
+      - "系統目前生效的工時設定在 employee-portal-v2 資料庫的 system_settings 資料表"
+
+  # ==========================================================
+  # product-catalog.md — 主要商品一覽（11 個 section_path）
+  # ==========================================================
+  - question: "公司有哪幾條產品線？各自鎖定的主要客群是誰？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 1. 產品線總覽"
+    expected_points:
+      - "玩具線：主要客群是學齡前至國小孩童的家長、送禮客"
+      - "服飾線：主要客群是學生與初入職場的年輕族群"
+      - "兩條線全部走電商與通路零售，沒有代工業務"
+
+  - question: "針織毛帽跟帆布托特包標示的參考售價是平常的定價嗎？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 2. 在售商品一覽"
+    expected_points:
+      - "這兩項的數值取自促銷檔期的訂單資料，並非平時定價，回答時應一併說明"
+      - "售價僅供參考，實際成交價以電商平台當下的標價與活動為準"
+
+  - question: "木製積木組是用什麼材質做的？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 3. 商品說明 > 3.1 木製積木組（4-01-001）"
+    expected_points:
+      - "櫸木實木製作，表面採用安全木器塗料塗裝，邊角導圓處理"
+      - "附收納盒，訴求是耐玩、不設定玩法"
+
+  - question: "絨毛玩偶的眼睛是用什麼方式固定的？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 3. 商品說明 > 3.2 絨毛玩偶（4-01-002）"
+    expected_points:
+      - "眼部使用縫合固定的眼扣，而非黏著件"
+      - "短毛絨布外層搭配填充棉，訴求耐洗、不易變形"
+
+  - question: "純棉短袖上衣的領口有做什麼特別處理？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 3. 商品說明 > 3.3 純棉短袖上衣（4-02-001）"
+    expected_points:
+      - "領口使用羅紋布收邊，減少多次水洗後的變形"
+      - "版型偏寬鬆，不強調當季流行剪裁"
+
+  - question: "針織毛帽是屬於什麼季節的商品？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 3. 商品說明 > 3.4 針織毛帽（4-02-002）"
+    expected_points:
+      - "秋冬季節性商品"
+      - "毛線針織、帽頂附毛球（可選款式），定位是平價耐用的日常配件"
+
+  - question: "帆布托特包的容量是以什麼為設計基準？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 3. 商品說明 > 3.5 帆布托特包（4-02-003）"
+    expected_points:
+      - "以「裝得下 A4 與筆電」為設計基準"
+      - "厚磅帆布、內襯加袋、開口處使用五金釦固定"
+
+  - question: "玩具禮盒組為什麼要用獨立料號，而不是把三個商品裝在一起出貨？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 3. 商品說明 > 3.6 玩具禮盒組（5-01-001）"
+    expected_points:
+      - "它是獨立料號（5 開頭）、獨立包裝"
+      - "在系統與報表中會被視為單一商品計算"
+
+  - question: "公司主要在賣什麼？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 4. 常見情境 Q&A"
+    expected_points:
+      - "玩具線：木製積木組、絨毛玩偶"
+      - "服飾線：純棉短袖上衣、針織毛帽、帆布托特包"
+      - "另有一項跨線的玩具禮盒組，共 6 項在售商品"
+
+  - question: "玩具禮盒組裡面有哪三件商品？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 4. 常見情境 Q&A"
+    expected_points:
+      - "內含積木、絨毛玩偶與帆布袋三件"
+      - "料號 5-01-001，售價參考值 NT$ 2,500，是單價最高的商品"
+
+  - question: "玩具線跟服飾線分別是哪個部門負責的？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 4. 常見情境 Q&A"
+    expected_points:
+      - "設計、打樣與材質開發由研發部負責"
+      - "電商與通路營運、經銷開發與訂單管理由業務部負責"
+
+  - question: "這份商品文件刻意排除了哪些資訊？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 5. 資料範圍與限制"
+    expected_points:
+      - "庫存數量、各倉庫存量、安全庫存警示"
+      - "產品結構（BOM）、半成品與原物料清單"
+      - "料號編碼體系的完整規則、採購供應商與成本資訊"
+
+  - question: "商品文件裡如果要查請假辦法，應該去看哪一份文件？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 6. 延伸文件"
+    expected_points:
+      - "請假辦法與福利制度看 leave-policy.md"
+      - "公司簡介看 company-profile.md、出勤規則看 attendance-rules.md"
+
+  # ==========================================================
+  # 誘導性問題（≥ 5 題）：語料中沒有答案，期望機器人明確拒答
+  # ==========================================================
+  - question: "木製積木組現在還有多少庫存？"
+    category: policy
+    expected_section_path: "主要商品一覽 > 4. 常見情境 Q&A"
+    expect_refusal: true
+    expected_points:
+      - "本文件不包含庫存資料"
+      - "庫存數量屬於每日變動的營運資料，請改於庫存系統查詢"
+      - "不得推測數字"
+
+  - question: "育嬰留職停薪要怎麼申請？可以留停多久？"
+    category: policy
+    expected_section_path: null
+    expect_refusal: true
+    expected_points:
+      - "文件中查無相關規定：語料只涵蓋特休、事假、病假、公假四種假別，沒有育嬰留停"
+
+  - question: "加班費一小時可以領多少錢？加班費怎麼計算？"
+    category: policy
+    expected_section_path: null
+    expect_refusal: true
+    expected_points:
+      - "文件中查無相關規定：語料只寫加班「時數」的認列規則，完全沒有加班「費用」或薪資計算"
+
+  - question: "公司的股票代號是多少？有沒有上市櫃？"
+    category: policy
+    expected_section_path: null
+    expect_refusal: true
+    expected_points:
+      - "文件中查無相關規定：公司簡介只有成立時間、總部、產業別與部門，沒有股票或上市櫃資訊"
+
+  - question: "員工可以申請在家遠端工作嗎？公司的遠距工作政策是什麼？"
+    category: policy
+    expected_section_path: null
+    expect_refusal: true
+    expected_points:
+      - "文件中查無相關規定：出勤規則只涵蓋打卡、補打卡、加班、場地借用，沒有遠距工作政策"
+
+  - question: "颱風天停班怎麼認定？颱風假要不要補上班？"
+    category: policy
+    expected_section_path: null
+    expect_refusal: true
+    expected_points:
+      - "文件中查無相關規定：語料的國定假日章節只講政府公告行事曆的維護方式，沒有颱風假或停班標準"
+
+  - question: "今年的員工旅遊要去哪裡玩？日期訂了嗎？"
+    category: policy
+    expected_section_path: null
+    expect_refusal: true
+    expected_points:
+      - "文件中查無相關規定：福利制度只寫員工旅遊的補助比例級距，沒有地點與日期"
+
+  # ==========================================================
+  # 推算題（第二版新增）
+  #
+  # 第一版一律禁止模型推算，實測發現這個約束過度到損害功能本身：語料明明寫著
+  # 「09:11:00 才算遲到」，問「9:20 算不算遲到」卻答不出來。第二版改成「推算的
+  # 依據必須來自文件」，這組題目就是這條界線的自動防線——開放推算之後，「模型
+  # 算錯」變成新的風險，這裡每一題的 ground truth 都由 v2 業務函式即時算出，
+  # 語料或業務規則任何一邊改動而兩者不一致時，eval 會立刻紅。
+  # ==========================================================
+  - question: "我 9:20 打卡上班，這樣算遲到嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.1 上班打卡與遲到判定"
+    expected_points:
+      - "直接回答會算遲到，不可以推說文件沒寫（界線 09:11:00 白紙黑字寫在語料裡）"
+      - "說明判定依據：打卡時間超過應到班時間加緩衝即為遲到"
+      - "提醒但書：當天若有從表定上班時間起連續涵蓋的已核准請假，應到班時間會往後推"
+
+  - question: "我加班了 1 小時 15 分鐘，可以認列幾小時？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.1 時數計算"
+    expected_points:
+      - "依 30 分鐘為單位無條件捨去，推算出 1 小時"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_overtime_hours
+      kwargs: {start: "2026-08-24T18:30:00", end: "2026-08-24T19:45:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "到職滿 15 年的話，特別休假有幾天？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "依「滿 10 年 16 日、之後每滿 1 年加給 1 日」推算出 21 日"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 180}
+      unit: "日"
+      in_corpus: false
+      expect_stated: required
+
+  # 這題是推算的邊界：無腦遞增會算成 36 日，正確答案受「至 30 日為止」的上限夾住。
+  # 語料把上限寫得很清楚，所以模型沒有理由算錯——算錯就代表它在硬套規則而沒有讀完。
+  - question: "我到職滿 30 年了，特別休假有幾天？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "答 30 日：受「至 30 日為止」的上限夾住，不是無腦遞增算出的 36 日"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 360}
+      unit: "日"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "下午 14:00 請假到 18:00，會被認列幾小時？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 3. 請假時數試算規則"
+    expected_points:
+      - "推算出 4 小時（下午時段不跨午休）"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_leave_hours
+      kwargs: {start: "2026-08-24T14:00:00", end: "2026-08-24T18:00:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required

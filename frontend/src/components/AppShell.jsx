@@ -22,6 +22,7 @@ export const NAV_ITEMS = [
   { to: "/requests", label: "我的申請", roles: ["admin", "manager", "employee"] },
   { to: "/approvals", label: "審核中心", roles: ["admin", "manager"] },
   { to: "/venue", label: "場地借用", roles: ["admin", "manager", "employee"] },
+  { to: "/chat", label: "AI 助理", roles: ["admin", "manager", "employee"] },
   { to: "/employees", label: "員工資訊", roles: ["admin", "manager", "employee"] },
   { to: "/departments", label: "部門管理", roles: ["admin"] },
   { to: "/holidays", label: "國定假日", roles: ["admin"], permissions: ["holidays.manage"] },

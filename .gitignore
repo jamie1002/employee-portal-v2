@@ -25,6 +25,10 @@ test-results/
 playwright-report/
 e2e/.auth/
 
+# AI 政策問答 eval 的執行結果（本機跑一次即可，報告內容貼進 PR，不進版控）
+backend/eval/eval_report.txt
+backend/eval/eval_answers.txt
+
 # 編輯器與作業系統
 .vscode/
 .idea/

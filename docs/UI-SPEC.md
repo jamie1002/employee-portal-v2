@@ -158,14 +158,15 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 | 3 | `/leave-balance` | 假別 | 全部 |
 | 4 | `/requests` | 我的申請 | 全部 |
 | 5 | `/venue` | 場地借用 | 全部 |
-| 6 | `/approvals` | 審核中心 | admin, manager |
-| 7 | `/admin/employees` | 員工資訊 | 全部（通訊錄用途） |
-| 8 | `/admin/departments` | 部門管理 | admin |
-| 9 | `/admin/holidays` | 國定假日 | admin **或持有 `holidays.manage`** |
-| 10 | `/admin/attendance` | 全公司出勤 | admin |
-| 11 | `/admin/settings` | 系統設定 | admin **或持有 `settings.manage`** |
-| 12 | `/admin/schema` | 資料庫管理 | admin |
-| 13 | `/admin/exports` | 匯出報表 | admin, manager **或持有 `exports.run`** |
+| 6 | `/chat` | AI 助理 | 全部 |
+| 7 | `/approvals` | 審核中心 | admin, manager |
+| 8 | `/admin/employees` | 員工資訊 | 全部（通訊錄用途） |
+| 9 | `/admin/departments` | 部門管理 | admin |
+| 10 | `/admin/holidays` | 國定假日 | admin **或持有 `holidays.manage`** |
+| 11 | `/admin/attendance` | 全公司出勤 | admin |
+| 12 | `/admin/settings` | 系統設定 | admin **或持有 `settings.manage`** |
+| 13 | `/admin/schema` | 資料庫管理 | admin |
+| 14 | `/admin/exports` | 匯出報表 | admin, manager **或持有 `exports.run`** |
 
 **選單過濾與頁面守門必須共用同一個判定函式**（見 §4.2 `hasAccess`），不得各自維護一份角色清單。
 
@@ -290,6 +291,22 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 - 未勾選任何欄位時兩顆按鈕皆停用。
 - 下載失敗時回應是 blob，需先轉文字解析出真正的錯誤訊息。
 
+### 3.18 `/chat` AI 助理
+
+- **區塊**：頁首標題 + 一行免責宣告（「回答僅依據公司政策文件。個人出勤紀錄、假別剩餘量與申請進度請至對應功能頁查詢。」）→ 對話區（`aria-live="polite"`）→ 輸入區。
+- **空狀態**：對話區顯示 3～4 顆建議問題按鈕（取自黃金題庫代表題），點擊直接送出，不需先打字。
+- **使用情境**：使用者輸入問題 → `Enter` 送出／`Shift+Enter` 換行 → 送出中按鈕停用並改文字「思考中…（已等待 N 秒）」→ 回答以對話泡泡呈現，交給 `SimpleMarkdown` 渲染。
+- **對話區固定高度、內部捲動**：容器用 `h-[60vh] max-h-[560px] min-h-[320px]` + `overflow-y-auto`，**不可以只設 `min-h`**——只設最小高度時容器會隨內容一路撐高，`overflow-y-auto` 永遠不生效，使用者看到的是整個頁面被推著往下捲。新訊息進來時自動捲到底部，否則固定高度下送出問題會像沒有反應。
+- **「— 依據：」引用行一律剝除不顯示**：模型仍被要求輸出（系統提示規則 4），因為那是 eval「引用率 100%」門檻用來自動驗證「答案確實有所本」的唯一機制；但掛在對話裡不像人在講話，所以只留在後端資料與驗證流程中。
+- **`answer.kind`**：`policy`（依檢索片段回答）與 `fallback`（檢索落空的寒暄／同理／引導）兩種都走同一套 markdown 渲染，不需要分支呈現。
+- **三種可預期的失敗各自獨立文案**，不得籠統回「發生錯誤」：
+  - `CHAT_UNAVAILABLE`（503）：「AI 助理目前無法使用（可能是展示環境尚未設定金鑰或語料），請稍後再試。」——展示環境最常見的一種。
+  - `CHAT_RATE_LIMITED`（429）：「提問太頻繁了，請稍等一下再問。」
+  - 其他：顯示後端 `error.message`，fallback 為「發送失敗，請稍後再試。」
+- **ColdStartBanner 例外**：`chat.api.js` 的請求帶 `skipSlowRequestTracking` 旗標，跳過 `client.js` 既有的慢請求追蹤——AI 回答本來就常超過 3 秒（冷啟動時更久），套用既有的追蹤會誤導成「伺服器喚醒中」。既有呼叫端都不帶這個旗標，行為不變。
+- **手機（375px）**：輸入區與對話內容維持單欄、完整可見，不得產生整頁水平捲軸。
+- **桌機（1280px）**：版面寬度與側邊欄配置與其他既有頁面一致。
+
 ---
 
 ## 4. 共用元件契約
@@ -335,6 +352,8 @@ export function hasAccess(user, { roles, permissions } = {}) {
 | `SimpleMarkdown` | 只支援標題／`-` 條列／粗體／行內程式碼／引言／段落。**空行才代表段落結束**（需段落緩衝），清單續行併回上一項。禁止 `dangerouslySetInnerHTML` |
 | `LeaveQuotaSummary` | 假別卡片，排除「公假」 |
 | `DatePickerField` | 自製日期選擇元件，取代原生 `<input type="date">`。欄位可以是空字串（區間篩選器的「不限日期」）；日曆彈出視窗**一律**用呼叫端傳入的 `initialViewDate`（來自 `useVirtualToday()`）決定初始顯示月份，不受瀏覽器真實現在時間影響。面板用 `createPortal` 掛到 `document.body`，避免祖先的 `.glass-panel`（`backdrop-filter`）建立堆疊環境而蓋住面板 |
+| `ChatMessage` | `prepareChatMarkdown()` 前處理（`utils/chatMarkdown.js`）：**剝除「— 依據：」引用行不顯示**、`1.`／`1)` 數字清單降級成 `-` 條列，本文交給 `SimpleMarkdown` 渲染，**不擴充 `SimpleMarkdown` 本身**。`policy` 與 `fallback` 兩種 kind 走同一套渲染 |
+| `ChatPage` | 見 §3.18。對話區固定高度 + 內部捲動 + 新訊息自動捲到底；送出中顯示「思考中…（已等待 N 秒）」。訊息序號用行程內遞增計數器（不用陣列 index，避免刪除/插入時 key 錯位） |
 
 ---
 

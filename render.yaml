@@ -25,3 +25,27 @@ services:
         sync: false
       - key: DEMO_RESET_IDLE_MINUTES
         value: "15"
+      # AI 政策問答（批 A）。GOOGLE_API_KEY 需先在 Neon 手動跑過 migrate + ingest
+      # 才能 merge 部署（docs/PITFALLS.md G4：push 不會自動更新雲端資料庫）。
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: GEMINI_REQUESTS_PER_MINUTE
+        value: "10"
+      - key: GEMINI_TIMEOUT_SECONDS
+        value: "40"
+      - key: GEMINI_TEMPERATURE
+        value: "0.3"
+      - key: EMBEDDING_MODEL
+        value: models/gemini-embedding-001
+      - key: EMBEDDING_DIM
+        value: "768"
+      - key: RETRIEVAL_TOP_K
+        value: "5"
+      - key: RETRIEVAL_MIN_SCORE
+        value: "0.65"
+      - key: CHAT_RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: CHAT_MAX_QUESTION_CHARS
+        value: "500"
