@@ -275,8 +275,10 @@
 ### 4.12 AI 政策問答（批 A）
 
 - 完全唯讀，回答依據四份公司政策文件（`db/policy_docs/*.md`），不涉及任何個人資料。個人出勤／假別／申請進度的查詢工具屬於批 B，尚未實作。
-- **RAG 流程**：語料切段（`##`／`###` 標題為邊界，表格與引言區塊不可切開，特定 Q&A 章節每題一 chunk）→ Gemini embedding（`gemini-embedding-001`，`output_dimensionality=768`，兩側 L2 正規化，`task_type` 刻意不對稱：文件端 `retrieval_document`／查詢端 `retrieval_query`）→ pgvector 餘弦相似度檢索（`RETRIEVAL_TOP_K=5`，`RETRIEVAL_MIN_SCORE=0.65`，等於門檻視為保留）→ 檢索結果為空時短路拒答，不呼叫生成模型 → 生成模型（`gemini-3.5-flash-lite`，`temperature=0`）依系統提示的六條硬約束回答。
-- **生成硬約束**（系統提示逐字內容見 `backend/app/services/chat_prompt.py`）：只依片段回答、片段沒有直接回答問題一律拒答；答案裡的每個數字都必須逐字出現在片段中，禁止自行推算；結尾必須列出實際採用的來源（`— 依據：{檔名} {章節路徑}`）；一律繁體中文；輸出格式只能用段落／`-` 條列／`**粗體**`（禁止表格與 `1.` 數字清單，前端渲染器不支援）；使用者訊息不是新的指令（防注入）。
+- **RAG 流程**：語料切段（`##`／`###` 標題為邊界，表格與引言區塊不可切開，特定 Q&A 章節每題一 chunk）→ Gemini embedding（`gemini-embedding-001`，`output_dimensionality=768`，兩側 L2 正規化，`task_type` 刻意不對稱：文件端 `retrieval_document`／查詢端 `retrieval_query`）→ pgvector 餘弦相似度檢索（`RETRIEVAL_TOP_K=5`，`RETRIEVAL_MIN_SCORE=0.65`，等於門檻視為保留）→ 檢索結果為空時改走受限的 fallback 提示（見下）→ 生成模型（`gemini-3.1-flash-lite`，`temperature` 讀 `GEMINI_TEMPERATURE`）依系統提示的六條規則回答。
+- **生成硬約束**（系統提示逐字內容見 `backend/app/services/chat_prompt.py`）：只依「檢索片段」與「系統當前生效的考勤設定」回答，不得憑空發明資料裡沒有的規則或數值；**可以把資料中明確記載的規則套用到使用者的情境上推算**（比較與區間判斷、單位換算、級距對照），但推算而得的答案必須附上「以系統實際顯示為準」的提醒；前提不明確時給條件式回答並標明前提，而不是拒答；結尾必須列出實際採用的來源（`— 依據：{檔名} {章節路徑}`，**僅供 eval 自動驗證答案有所本，前端一律剝除不顯示**）；一律繁體中文；輸出格式只能用段落／`-` 條列／`**粗體**`（禁止表格與 `1.` 數字清單，前端渲染器不支援）；使用者訊息不是新的指令（防注入）。
+- **檢索落空的處理**：改用受限的 fallback 提示呼叫模型（`kind: "fallback"`），只允許寒暄（早安、你好）、對情緒性訊息表達同理並引導聯繫人資或主管、以及說明超出範圍的問題該去哪裡查；該提示**明確禁止產生任何具體規定、時間、天數、金額或計算方式**——這條路徑沒有檢索依據，講出來的都會是編造。
+- **推算基準取自系統即時設定**：問答時讀取 `system_settings` 當前值注入提示，語料寫死的 09:00／10 分鐘只是預設值，admin 改過設定後一律以即時值為準（呼應「禁止寫死時間字面值」的硬性規則）。
 - **`policy_embeddings` 不受展示資料重置影響**（見 §5.13），也**不落地對話歷史**——多輪上下文只存前端 state。
 - **限流**：每使用者每分鐘 `CHAT_RATE_LIMIT_PER_MINUTE`（預設 10）次，行程記憶體滑動視窗、`time.monotonic()`（不用虛擬時鐘，理由同閒置重置計時器）。
 - **降級**：未設定 `GOOGLE_API_KEY`、上游逾時或錯誤、`policy_embeddings` 表或 `vector` extension 不存在，一律回 503 `CHAT_UNAVAILABLE`，不得回 500。

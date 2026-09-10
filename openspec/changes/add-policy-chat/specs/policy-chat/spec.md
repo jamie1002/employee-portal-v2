@@ -31,11 +31,12 @@
 - **WHEN** 系統觸發展示資料閒置自動重置（`demo_auto_reset`）
 - **THEN** 重置完成後 `policy_embeddings` 的筆數 SHALL 仍為 N
 
-### Requirement: 檢索門檻與短路
+### Requirement: 檢索門檻與落空處理
 
 系統 SHALL 以餘弦相似度對 `policy_embeddings` 排序，並僅保留分數大於等於
-`RETRIEVAL_MIN_SCORE` 的結果；當保留結果為空時，系統 SHALL 短路直接回傳拒答，
-MUST NOT 呼叫生成模型。
+`RETRIEVAL_MIN_SCORE` 的結果；當保留結果為空時，系統 SHALL 改用一個受限的
+fallback 提示呼叫生成模型，該提示 MUST NOT 產生任何具體的公司規定、時間、天數、
+金額或計算方式，僅得用於寒暄、同理與引導。
 
 #### Scenario: 分數高於門檻的結果被保留
 - **GIVEN** 某 chunk 與查詢向量的餘弦相似度為 0.70，`RETRIEVAL_MIN_SCORE` 為 0.65
@@ -47,10 +48,19 @@ MUST NOT 呼叫生成模型。
 - **WHEN** 執行檢索
 - **THEN** 該 chunk SHALL 出現在檢索結果中（門檻為「大於等於」，不是「大於」）
 
-#### Scenario: 全部結果被門檻篩掉時不呼叫生成模型
+#### Scenario: 全部結果被門檻篩掉時改走受限的 fallback 提示
 - **GIVEN** 查詢與語料庫中所有 chunk 的相似度皆低於 `RETRIEVAL_MIN_SCORE`
+  （例如使用者輸入「早安」或抱怨工作壓力）
 - **WHEN** 呼叫 `chat.ask()`
-- **THEN** 系統 SHALL 回傳 `refused: true` 且 `text` 為固定拒答文字，MUST NOT 呼叫 Gemini 生成 API
+- **THEN** 系統 SHALL 以 fallback 提示呼叫生成模型並回傳 `kind: "fallback"`、
+  `refused: true`、`sources: []`，且 MUST NOT 使用政策問答的系統提示
+  （沒有檢索依據時使用該提示會讓模型憑空談論規定）
+
+#### Scenario: 打招呼與情緒性輸入得到自然回應
+- **GIVEN** 使用者輸入「早安」、「你好」這類問候，或帶有情緒的抱怨
+- **WHEN** 呼叫 `POST /api/chat`
+- **THEN** 系統 SHALL 回應親切的問候或同理，並引導至可以協助的方向
+  （政策問題範例、或建議聯繫人資與主管），MUST NOT 回覆制式的「查無相關規定」
 
 ### Requirement: `POST /api/chat` 契約
 
@@ -71,20 +81,40 @@ MUST NOT 呼叫生成模型。
 - **WHEN** 呼叫 `POST /api/chat`
 - **THEN** 系統 SHALL 回應 401，`error.code` 為 `UNAUTHORIZED` 或 `INVALID_TOKEN`
 
-### Requirement: 生成硬約束
+### Requirement: 生成硬約束與推算界線
 
-系統 SHALL 要求生成模型僅依據檢索到的片段回答問題：有答案時 MUST 附上來源章節路徑，
-片段中查無對應內容時 MUST 拒答，不得憑既有知識推測或補充。
+系統 SHALL 要求生成模型僅依據「檢索到的片段」與「系統當前生效的考勤設定」回答；
+模型 MAY 將這些資料中明確記載的規則與數值套用到使用者提供的情境上進行推算
+（比較、單位換算、級距對照），但 MUST NOT 憑空發明資料中沒有的規則或數值。
+凡屬推算而得的答案，回答 MUST 附上「以系統實際顯示為準」意涵的提醒。
+
+> 第一版一律禁止推算，導致語料明確寫著「09:11:00 才算遲到」時，模型仍無法回答
+> 「9:20 打卡算不算遲到」。RAG 語料無法窮舉所有數值案例，禁止規則套用等同讓助理
+> 退化成文件複讀機，因此改為依「推算依據是否來自提供的資料」分界。
+
+#### Scenario: 依據明確時推算並直接回答
+- **GIVEN** 檢索片段記載「打卡時間超過應到班時間加緩衝即為遲到，09:11:00 才算遲到」
+- **WHEN** 使用者詢問「我 9:20 打卡算遲到嗎」
+- **THEN** 系統 SHALL 直接回答會判定為遲到，並附上「以系統實際顯示為準」的提醒，
+  MUST NOT 以「文件未直接列出」為由拒答
+
+#### Scenario: 依據不在資料中時不得發明
+- **GIVEN** 檢索片段完全沒有記載加班費的計算方式
+- **WHEN** 使用者詢問「加班費一小時多少錢」
+- **THEN** 系統 SHALL 說明文件未涵蓋此主題，MUST NOT 自行套用任何公式或金額
+
+#### Scenario: 前提不明確時給出條件式回答
+- **GIVEN** 使用者的問題涉及模型無法得知的前提（例如當天是否有已核准的請假會使
+  應到班時間後推、或請假區間跨越哪一週而不知有無國定假日）
+- **WHEN** 生成回答
+- **THEN** 回答 SHALL 依預設情況給出結論並明確標示該前提，MUST NOT 直接拒答，
+  也 MUST NOT 假裝該前提不存在
 
 #### Scenario: 有答案時附上來源
-- **GIVEN** 檢索到的片段可直接回答使用者的問題
+- **GIVEN** 檢索到的片段可回答使用者的問題
 - **WHEN** 生成回答
 - **THEN** 回答文字 SHALL 包含依據片段的 `source_file` 與 `section_path`
-
-#### Scenario: 片段無法直接回答時拒答
-- **GIVEN** 檢索到的片段主題相關但未直接回答使用者的問題
-- **WHEN** 生成回答
-- **THEN** 回答 SHALL 標記為拒答（`refused: true`），MUST NOT 將片段內容套用到問題未涵蓋的情境上作為答案
+  （供 eval 自動驗證答案有所本；前端一律剝除不顯示給使用者）
 
 ### Requirement: 不可用時降級
 
