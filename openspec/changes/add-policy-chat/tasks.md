@@ -203,7 +203,27 @@
       （該檔在 `.gitignore` 內，不影響版控）
 - [ ] 本機 e2e 有既有的冷啟動間歇性逾時，連未改動的 `auth.spec.js` 都會受影響
       （見 7t.1）
-- [ ] 尚未 push、尚未開 PR、尚未部署雲端（Neon migrate + ingest → Render 環境變數）
+
+## 11. 雲端上線（2026-09-11）
+
+- [x] 11.1 帶 Neon 正式庫連線字串跑 `npm run db:migrate`，套用 `002_policy_embeddings.sql`
+- [x] 11.2 帶 `GOOGLE_API_KEY` 跑 `npm run db:ingest`，`policy_embeddings` 新增 61 筆
+      （切段結果：attendance-rules 20、company-profile 8、leave-policy 19、
+      product-catalog 14）
+- [x] 11.3 `feature/policy-chat` 直接合併進 `main` 並 push（`b3fda21`），Render／
+      Vercel 自動建置部署
+- [x] 11.4 Render 環境變數手動補 `GOOGLE_API_KEY`——**`render.yaml` 裡 `sync: false`
+      的 key 不會在 push 當下自動出現在 Render 後台清單，需要手動用「Add
+      Environment Variable」新增，不是等它自己冒出來**（見 `docs/PITFALLS.md` G7）
+- [x] 11.5 驗證：`curl https://employee-portal-api-107g.onrender.com/api/health`
+      回 `"policy_chunk_count":61`；線上用 `employee@demo.com` 實測推算題
+      （「9:20 打卡算不算遲到」）與越權題（「我的薪水是多少」），回覆內容與語氣
+      符合第二版修正的預期
+- [x] 11.6 GitHub Actions CI 第一次跑在 `test_room_booking_concurrent.py` 遇到
+      `DeadlockDetectedError` 失敗，與本次改動無關（既有的並發測試間歇性問題），
+      `gh run rerun --failed` 後轉綠
+
+**狀態：批 A 已正式上線，功能與 eval 門檻皆驗證完畢。**
 
 ## 9. 驗收
 

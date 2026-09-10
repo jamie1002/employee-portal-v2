@@ -352,6 +352,10 @@ Render 免費方案長時間無人使用後，第一次請求會有數十秒的�
 
 前一版的 CI 設定把 Playwright 失敗截圖的上傳路徑寫成 `e2e/test-results`，但實際輸出在專案根目錄的 `test-results/`，導致每次失敗都顯示「No files were found」，從來沒真的收集到診斷資料。設定完要實際製造一次失敗來驗證。
 
+### G7. `render.yaml` 新增的 `sync: false` 環境變數不會自動出現在 Render 後台
+
+`render.yaml` 裡新增一個 `sync: false` 的 key（例如批 A 的 `GOOGLE_API_KEY`），push 之後 Render 觸發的部署會用「這個 key 目前沒有值」的狀態直接建置，**不會在 Environment 頁面自動生出一列讓你填**——那份清單只反映「上一次同步過的內容」，新 key 要自己按「Add Environment Variable」手動加，不能在畫面上用捲動或排序去找一列「本來就該出現但還沒出現」的東西。判斷方式很直接：照 key 名稱的字母順序看它兩側的鄰居有沒有出現，兩側都在、中間那個缺了，就是還沒同步，直接手動新增即可，不用等。
+
 ---
 
 ## H. 除錯方法論
