@@ -141,13 +141,14 @@ questions:
     expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.1 時數計算"
     expected_points:
       - "複述規則：加班時數以 30 分鐘為單位無條件捨去"
-      - "語料沒有 45 分鐘這個範例，不得自行套規則算出數字"
-      - "應提示使用者於系統「我的申請」頁面實際試算"
+      - "依規則推算出 0.5 小時並直接回答（規則與單位都寫在語料裡，屬於可推算範圍）"
+      - "推算出來的答案要提醒以系統實際顯示為準"
     expected_number:
       function: calculate_overtime_hours
       kwargs: {start: "2026-08-24T18:30:00", end: "2026-08-24T19:15:00"}
       unit: "小時"
       in_corpus: false
+      expect_stated: required
 
   - question: "當天有一筆待審核的補打卡申請時，還可以送加班申請嗎？"
     category: policy
@@ -312,6 +313,7 @@ questions:
       kwargs: {total_months: 36}
       unit: "日"
       in_corpus: true
+      expect_stated: required
 
   - question: "到職剛滿 6 個月有特休嗎？有的話幾天？"
     category: policy
@@ -324,6 +326,7 @@ questions:
       kwargs: {total_months: 6}
       unit: "日"
       in_corpus: true
+      expect_stated: required
 
   - question: "到職滿 12 年的話特休有幾天？"
     category: policy
@@ -336,6 +339,7 @@ questions:
       kwargs: {total_months: 144}
       unit: "日"
       in_corpus: true
+      expect_stated: required
 
   # 誘算題：語料的級距表列到「11 年起每滿 1 年 +1 日」，註解舉例到滿 12 年 18 日與滿 24 年上限，
   # 但沒有列出滿 20 年。要答出 26 日必須自己推算，依 SPEC §6.2 硬約束 2 應拒答。
@@ -344,13 +348,14 @@ questions:
     expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
     expected_points:
       - "複述規則：滿 10 年起每滿 1 年加給 1 日，至 30 日為止"
-      - "語料沒有列出滿 20 年的天數，不得自行推算"
-      - "應提示使用者於系統「我的申請」頁面查看實際配額"
+      - "依規則推算出 26 日並直接回答（級距規則與 30 日上限都寫在語料裡，屬於可推算範圍）"
+      - "推算出來的答案要提醒以系統實際顯示為準"
     expected_number:
       function: special_leave_days
       kwargs: {total_months: 240}
       unit: "日"
       in_corpus: false
+      expect_stated: required
 
   - question: "請假時數是怎麼算的？多天請假中間的完整工作日也會套用緩衝嗎？"
     category: policy
@@ -370,6 +375,7 @@ questions:
       kwargs: {start: "2026-08-24T09:00:00", end: "2026-08-24T12:00:00"}
       unit: "小時"
       in_corpus: true
+      expect_stated: required
 
   - question: "請假申請被駁回的時候，審核的人一定要寫理由嗎？"
     category: policy
@@ -398,6 +404,7 @@ questions:
       kwargs: {start: "2026-08-24T13:00:00", end: "2026-08-24T18:00:00"}
       unit: "小時"
       in_corpus: true
+      expect_stated: required
 
   - question: "半天的特別休假需要填寫事由嗎？"
     category: policy
@@ -412,11 +419,13 @@ questions:
     expected_points:
       - "不會，系統逐工作日計算，週末與國定假日一律自動排除"
       - "只有頭尾兩端的工作日才套用緩衝，中間完整工作日用表定時間計算"
+      - "前提不明確（不知道是哪一週、中間有沒有國定假日），講出具體時數時要標明前提；不講具體數字也可以"
     expected_number:
       function: calculate_leave_hours
       kwargs: {start: "2026-08-28T09:00:00", end: "2026-08-31T18:00:00"}
       unit: "小時"
       in_corpus: false
+      expect_stated: optional
 
   - question: "申請被主管駁回了，接下來我可以做什麼？"
     category: policy
@@ -627,3 +636,74 @@ questions:
     expect_refusal: true
     expected_points:
       - "文件中查無相關規定：福利制度只寫員工旅遊的補助比例級距，沒有地點與日期"
+
+  # ==========================================================
+  # 推算題（第二版新增）
+  #
+  # 第一版一律禁止模型推算，實測發現這個約束過度到損害功能本身：語料明明寫著
+  # 「09:11:00 才算遲到」，問「9:20 算不算遲到」卻答不出來。第二版改成「推算的
+  # 依據必須來自文件」，這組題目就是這條界線的自動防線——開放推算之後，「模型
+  # 算錯」變成新的風險，這裡每一題的 ground truth 都由 v2 業務函式即時算出，
+  # 語料或業務規則任何一邊改動而兩者不一致時，eval 會立刻紅。
+  # ==========================================================
+  - question: "我 9:20 打卡上班，這樣算遲到嗎？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 2. 上下班打卡 > 2.1 上班打卡與遲到判定"
+    expected_points:
+      - "直接回答會算遲到，不可以推說文件沒寫（界線 09:11:00 白紙黑字寫在語料裡）"
+      - "說明判定依據：打卡時間超過應到班時間加緩衝即為遲到"
+      - "提醒但書：當天若有從表定上班時間起連續涵蓋的已核准請假，應到班時間會往後推"
+
+  - question: "我加班了 1 小時 15 分鐘，可以認列幾小時？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.1 時數計算"
+    expected_points:
+      - "依 30 分鐘為單位無條件捨去，推算出 1 小時"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_overtime_hours
+      kwargs: {start: "2026-08-24T18:30:00", end: "2026-08-24T19:45:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "到職滿 15 年的話，特別休假有幾天？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "依「滿 10 年 16 日、之後每滿 1 年加給 1 日」推算出 21 日"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 180}
+      unit: "日"
+      in_corpus: false
+      expect_stated: required
+
+  # 這題是推算的邊界：無腦遞增會算成 36 日，正確答案受「至 30 日為止」的上限夾住。
+  # 語料把上限寫得很清楚，所以模型沒有理由算錯——算錯就代表它在硬套規則而沒有讀完。
+  - question: "我到職滿 30 年了，特別休假有幾天？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "答 30 日：受「至 30 日為止」的上限夾住，不是無腦遞增算出的 36 日"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 360}
+      unit: "日"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "下午 14:00 請假到 18:00，會被認列幾小時？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 3. 請假時數試算規則"
+    expected_points:
+      - "推算出 4 小時（下午時段不跨午休）"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_leave_hours
+      kwargs: {start: "2026-08-24T14:00:00", end: "2026-08-24T18:00:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required

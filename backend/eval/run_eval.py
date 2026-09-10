@@ -27,8 +27,19 @@ import）、檢索與生成改呼叫新的 service（`policy_retrieval` / `chat_
 什麼參數，實際數值在這裡即時 import 本專案的業務函式算出。語料被改壞或 v2 規則變更
 時，`in_corpus: true` 的一致性檢查會立刻紅。
 
-**回答端的數字檢查是雙向的**：語料有寫的數字要求回答講出來；語料沒寫的數字要求回答
-**不可以**出現——講出來就代表模型自己做了算術，違反系統提示規則 2。
+**第二版：開放推算之後，數字檢查的方向整個反過來了。** 第一版禁止模型做任何推算，
+所以「語料沒寫的數字」出現在回答裡就算失敗；實測發現這個約束過度到損害功能——語料
+白紙黑字寫著「09:11:00 才算遲到」，問「9:20 算不算遲到」卻答不出來。現在改成兩個
+獨立的欄位判斷：
+
+- `in_corpus`：語料有沒有白紙黑字寫這個數字 → 決定要不要做「語料 vs v2 業務函式」
+  的一致性檢查（這一項驗證的是語料本身沒寫錯，與回答無關）
+- `expect_stated`：回答該不該講出這個數字 → `required`（依據都在資料裡，模型應該
+  推算出來並講明）／`optional`（前提不明確，例如不知道是哪一週、中間有沒有國定假日）
+
+**推算題另外多一道但書檢查**：語料沒寫死、由模型推算出來的答案，必須附上「以系統
+實際顯示為準」這類提醒——推算的前提（當天班表、請假狀況）可能與使用者的實際情形
+不同，沒有這句提醒，使用者會把推算結果當成系統的正式判定。
 """
 
 from __future__ import annotations
@@ -56,6 +67,7 @@ from app.config.database import create_pool  # noqa: E402
 from app.config.settings import app_settings  # noqa: E402
 from app.repositories import policy_repository  # noqa: E402
 from app.services import chat_prompt  # noqa: E402
+from app.services import settings as settings_service  # noqa: E402
 from app.services.leave_hours import calculate_leave_hours, calculate_overtime_hours  # noqa: E402
 from app.services.leave_quota import special_leave_days  # noqa: E402
 from app.services.policy_retrieval import RetrievalResult  # noqa: E402
@@ -72,6 +84,13 @@ TZ = "Asia/Taipei"
 # 這裡再加一層重試，避免整輪 72 題只因為一次暫時性節流就整份驗收變紅。
 _QUOTA_RETRIES = 3
 _QUOTA_RETRY_WAIT = 30
+
+# 檢索落空的內部標記：eval 不為這條路徑呼叫 API（見下方說明）。
+_NO_CONTEXT_MARKER = "（檢索落空，未呼叫政策問答生成）"
+
+# 推算型答案必須附上的但書。措辭不強制統一，只要有表達「以系統實際顯示為準」
+# 的意思即可，所以比對幾種常見說法而不是單一字串。
+_DISCLAIMER_MARKERS = ("系統顯示為準", "系統實際顯示", "以系統為準", "系統顯示的為準", "系統實際判定")
 
 _GROUND_TRUTH_FUNCTIONS = {
     "calculate_leave_hours": calculate_leave_hours,
@@ -100,6 +119,27 @@ def _format_number(value: float | int) -> str:
     return f"{value:g}"
 
 
+# 單位的同義寫法。語料的級距表寫「14 日」，但模型在自然對話時會講「14 天」——
+# 第一版語氣生硬時模型傾向照抄語料用字，語氣改自然之後就改用口語說法了。
+# 只比對單一字串會把「答對了但換個說法」誤判成失敗（實測一輪因此假紅 4 題）。
+_UNIT_SYNONYMS = {
+    "日": ("日", "天"),
+    "天": ("日", "天"),
+    "小時": ("小時", "個小時"),
+}
+
+
+def _number_variants(value: float | int, unit: str) -> tuple[str, ...]:
+    """產生可接受的數值寫法（含單位同義詞與有無空格的差異）。"""
+    number = _format_number(value)
+    units = _UNIT_SYNONYMS.get(unit, (unit,)) if unit else ("",)
+    variants: list[str] = []
+    for candidate in units:
+        variants.append(f"{number} {candidate}".strip())
+        variants.append(f"{number}{candidate}")
+    return tuple(dict.fromkeys(variants))
+
+
 @dataclass
 class QuestionResult:
     question: str
@@ -114,11 +154,19 @@ class QuestionResult:
     number_ok: bool | None = None
     number_detail: str = ""
     number_in_corpus: bool | None = None
-    """這個數字有沒有寫在語料裡，決定回答端的檢查方向（見 questions.yaml 的 in_corpus 說明）。"""
+    """這個數字有沒有寫在語料裡，決定要不要做「語料 vs v2 函式」一致性檢查。"""
+
+    expect_stated: str = "required"
+    """回答該不該講出這個數字：`required`（依據都在資料裡，應該推算出來）／
+    `optional`（前提不明確，例如不知道是哪一週、中間有沒有國定假日）。"""
+
+    answer_has_disclaimer: bool | None = None
+    """推算出來的答案有沒有加上「以系統顯示為準」這類但書（系統提示規則 2 的硬性要求）。"""
 
     should_be_answered: bool = True
-    """這題是否「必須答得出來」。誘導題（expect_refusal）與誘算題（in_corpus: false）除外——
-    前者本來就該拒答，後者拒不拒答都可以、只要別把數字算出來。其餘題目若被拒答就是**過度拒答**。"""
+    """這題是否「必須答得出來」。只有誘導題（expect_refusal）除外——語料真的沒有答案，
+    本來就該拒答。第二版開放推算之後，推算題也必須答得出來（第一版把它們排除在這項
+    檢查之外，等於默許助理對「9:20 算不算遲到」這類問題擺爛）。"""
 
     # --- 以下為生成端，--skip-generation 時全部維持 None ---
     answer_text: str | None = None
@@ -171,6 +219,8 @@ async def run_eval(
 ) -> tuple[list[QuestionResult], dict[str, str]]:
     client = get_gemini_client()
     corpus = await _load_corpus_by_section_path(pool)
+    # 與正式問答路徑一致：推算的基準取自系統當前生效的考勤設定，不是語料寫死的預設值。
+    live_settings = await settings_service.get_settings(pool)
     results: list[QuestionResult] = []
 
     started_at = monotonic()
@@ -208,15 +258,22 @@ async def run_eval(
         if number_spec:
             value = _compute_ground_truth(number_spec)
             unit = number_spec.get("unit", "")
-            needle = f"{_format_number(value)} {unit}".strip()
+            variants = _number_variants(value, unit)
+            needle = variants[0]
             result.number_label = f"{number_spec['function']}{number_spec.get('kwargs', {})} = {needle}"
             result.number_in_corpus = bool(number_spec.get("in_corpus"))
-            if not number_spec.get("in_corpus"):
-                result.should_be_answered = False
+            # `expect_stated` 與 `in_corpus` 是兩件獨立的事，第二版刻意拆開：
+            #   in_corpus     語料有沒有白紙黑字寫這個數字 → 決定要不要做「語料 vs
+            #                 v2 業務函式」的一致性檢查（驗證語料沒寫錯）
+            #   expect_stated 回答該不該講出這個數字 → required（依據都在資料裡，
+            #                 應該推算出來）／optional（前提不明確，講不講都可以）
+            # 第一版只有 in_corpus，且語料沒寫就等於「回答不可出現」——那正是讓
+            # 助理連「9:20 晚於 9:11」都不敢回答的根源。
+            result.expect_stated = number_spec.get("expect_stated", "required")
 
             if number_spec.get("in_corpus") and expected_path:
                 section_text = corpus.get(expected_path, "")
-                result.number_ok = needle in section_text
+                result.number_ok = any(v in section_text for v in variants)
                 result.number_detail = (
                     f"語料章節「{expected_path}」{'有' if result.number_ok else '找不到'}「{needle}」"
                 )
@@ -230,9 +287,17 @@ async def run_eval(
             for attempt in range(_QUOTA_RETRIES):
                 try:
                     if not usable:
-                        generated_text = chat_prompt.NO_ANSWER_TEXT
+                        # 檢索落空：正式環境走 FALLBACK_PROMPT 生成自然回應，但 eval
+                        # 不需要為此燒配額——這條路徑必定是拒答，指標上的意義只有
+                        # 「誘導題有沒有被擋下」，直接標記即可。
+                        generated_text = _NO_CONTEXT_MARKER
                         break
-                    user_content = chat_prompt.build_user_content(usable, item["question"])
+                    # 必須跟 `chat.py` 一樣注入系統當前生效的考勤設定——少了它，
+                    # eval 測到的是一個「拿不到設定」的降級環境，模型會多講一句
+                    # 「系統設定無法取得」，評出來的品質與正式路徑不一致。
+                    user_content = chat_prompt.build_user_content(
+                        usable, item["question"], live_settings
+                    )
                     generated_text = await client.generate(chat_prompt.SYSTEM_PROMPT, user_content)
                     break
                 except GeminiUnavailable as exc:
@@ -257,14 +322,31 @@ async def run_eval(
 
             if generated_text is not None:
                 result.answer_text = generated_text
-                result.answer_refused = chat_prompt.is_refusal(generated_text)
+                # 落空路徑不靠字串比對——那條路徑本來就沒有依據，必定是拒答。
+                result.answer_refused = (
+                    True if generated_text == _NO_CONTEXT_MARKER else chat_prompt.is_refusal(generated_text)
+                )
                 source_files = {source.source_file for source in usable}
                 result.answer_has_citation = "依據：" in generated_text and any(
                     source_file in generated_text for source_file in source_files
                 )
                 if needle:
-                    stated = needle in generated_text
-                    result.answer_number_ok = stated if number_spec.get("in_corpus") else not stated
+                    stated = any(v in generated_text for v in variants)
+                    # required：依據都在資料裡，回答必須講出這個數字（且必須正確——
+                    #           ground truth 是 v2 業務函式即時算出的，不是手填）
+                    # optional：前提不明確，講不講都可以；但若講了就必須是對的
+                    if result.expect_stated == "optional":
+                        result.answer_number_ok = True
+                    else:
+                        result.answer_number_ok = stated
+
+                    # 推算出來的答案必須附上但書。推算的前提（當天班表、請假狀況、
+                    # 是哪一週）可能與使用者的實際情形不同，沒有這句提醒，使用者會
+                    # 把推算結果當成系統的正式判定。
+                    if not number_spec.get("in_corpus"):
+                        result.answer_has_disclaimer = any(
+                            marker in generated_text for marker in _DISCLAIMER_MARKERS
+                        )
 
         results.append(result)
 
@@ -408,17 +490,31 @@ def _report(results: list[QuestionResult], corpus: dict[str, str]) -> bool:
         numeric_rate = numeric_ok / len(numeric_answered) if numeric_answered else 1.0
         print(
             f"數字型答案正確：{numeric_ok}/{len(numeric_answered)} = {numeric_rate:.1%}（門檻 100%）\n"
-            "  （語料有寫的數字→回答要講出來；語料沒寫的→回答不可以出現，出現代表模型自己算了）"
+            "  （ground truth 一律由 v2 業務函式即時算出；expect_stated=required 的題目\n"
+            "   回答必須講出這個數字，optional 的題目前提不明確、講不講都可以）"
         )
         for r in numeric_answered:
             if not r.answer_number_ok:
-                if r.number_in_corpus:
-                    print(f"  FAIL 答案裡找不到語料寫明的數字（{r.number_label}）：{r.question}")
-                else:
-                    print(f"  FAIL 模型自行算出了語料沒寫的數字（{r.number_label}）：{r.question}")
+                print(f"  FAIL 回答沒有講出正確的推算結果（{r.number_label}）：{r.question}")
                 print(f"     回答：{(r.answer_text or '')[:160]}")
         if numeric_ok != len(numeric_answered):
             generation_failures.append("有數字型答案與 v2 函式輸出不一致")
+
+        # 推算題的但書檢查：推算的前提（當天班表、請假狀況、是哪一週）可能與使用者的
+        # 實際情形不同，沒有這句提醒，使用者會把推算結果當成系統的正式判定。
+        derived = [r for r in answered if r.answer_has_disclaimer is not None]
+        with_disclaimer = sum(1 for r in derived if r.answer_has_disclaimer)
+        disclaimer_rate = with_disclaimer / len(derived) if derived else 1.0
+        print(
+            f"推算型答案附上但書：{with_disclaimer}/{len(derived)} = {disclaimer_rate:.1%}（門檻 100%）\n"
+            "  （語料沒有寫死、由模型推算出來的答案，必須提醒以系統實際顯示為準）"
+        )
+        for r in derived:
+            if not r.answer_has_disclaimer:
+                print(f"  FAIL 推算結果沒有附上「以系統顯示為準」的提醒：{r.question}")
+                print(f"     回答：{(r.answer_text or '')[:160]}")
+        if with_disclaimer != len(derived):
+            generation_failures.append("有推算型答案沒有附上「以系統顯示為準」的但書")
         print()
 
     passed = (
@@ -448,14 +544,19 @@ def _format_answers_for_review(results: list[QuestionResult], questions: list[di
     lines: list[str] = []
     for index, (result, item) in enumerate(zip(results, questions), start=1):
         lines.append("=" * 78)
-        kind = "誘導題" if result.expect_refusal else ("誘算題" if not result.should_be_answered else "一般")
+        if result.expect_refusal:
+            kind = "誘導題"
+        elif result.number_label and not result.number_in_corpus:
+            kind = "推算題"
+        else:
+            kind = "一般"
         lines.append(f"第 {index} 題　[{kind}]　{result.question}")
         lines.append(f"期望章節：{result.expected_section_path or '（語料無對應章節）'}")
         lines.append("期望要點：")
         for point in item.get("expected_points", []):
             lines.append(f"  - {point}")
         if result.number_label:
-            direction = "回答應講出" if result.number_in_corpus else "回答不可出現"
+            direction = "回答必須講出" if result.expect_stated == "required" else "講不講都可以（前提不明確）"
             lines.append(f"數字 ground truth：{result.number_label}（{direction}）")
         lines.append("-" * 78)
         lines.append(result.answer_text or f"（無回答：{result.answer_error or '未執行生成'}）")
