@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { askChat } from "../api/chat.api";
 import ChatMessage from "../components/ChatMessage";
 
@@ -32,6 +32,29 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [waitingSeconds, setWaitingSeconds] = useState(0);
+  const scrollRef = useRef(null);
+
+  // 對話區改成固定高度後，新訊息會落在可視範圍外，必須主動捲到底部，
+  // 否則使用者送出問題後會以為沒有反應。
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
+  }, [messages, isSubmitting]);
+
+  // AI 回答的等待時間本來就長（免費層的生成延遲抖動大，實測 1.5～8 秒都有可能），
+  // 只顯示靜止的「思考中…」會讓人懷疑系統是不是掛了；跳動的秒數是「還活著」的訊號。
+  useEffect(() => {
+    if (!isSubmitting) {
+      setWaitingSeconds(0);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setWaitingSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isSubmitting]);
 
   async function sendQuestion(rawQuestion) {
     const question = rawQuestion.trim();
@@ -74,9 +97,12 @@ export default function ChatPage() {
         </p>
       </div>
 
+      {/* 固定高度是必要的：只設 min-h 的話容器會隨內容一路撐高，overflow-y-auto
+          永遠不會生效，使用者看到的是整個頁面被推著往下捲，而不是對話框內部捲動。 */}
       <div
+        ref={scrollRef}
         aria-live="polite"
-        className="glass-panel min-h-[320px] flex-1 space-y-3 overflow-y-auto rounded-xl p-4"
+        className="glass-panel h-[60vh] max-h-[560px] min-h-[320px] space-y-3 overflow-y-auto rounded-xl p-4"
       >
         {messages.length === 0 ? (
           <div className="space-y-3">
@@ -103,7 +129,11 @@ export default function ChatPage() {
             ),
           )
         )}
-        {isSubmitting && <p className="text-xs text-text-muted">思考中…</p>}
+        {isSubmitting && (
+          <p className="text-xs text-text-muted">
+            思考中…{waitingSeconds > 0 && `（已等待 ${waitingSeconds} 秒）`}
+          </p>
+        )}
       </div>
 
       <div className="flex items-end gap-2">

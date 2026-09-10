@@ -9,7 +9,7 @@ describe("ChatMessage", () => {
     expect(screen.getByText("特別休假怎麼算？")).toBeInTheDocument();
   });
 
-  test("policy 分支渲染回答內容與依據 chips", () => {
+  test("渲染回答內容，但一律剝除「依據」行不顯示給使用者", () => {
     const answer = {
       kind: "policy",
       text: "特別休假滿一年可休 7 日。\n\n— 依據：leave-policy.md 2.1 特別休假級距",
@@ -20,7 +20,21 @@ describe("ChatMessage", () => {
     render(<ChatMessage role="assistant" answer={answer} />);
 
     expect(screen.getByText(/特別休假滿一年可休 7 日/)).toBeInTheDocument();
-    expect(screen.getByText(/依據：leave-policy.md 2.1 特別休假級距/)).toBeInTheDocument();
+    expect(screen.queryByText(/依據：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/leave-policy\.md/)).not.toBeInTheDocument();
+  });
+
+  test("fallback（檢索落空的寒暄／同理回應）同樣走 markdown 渲染", () => {
+    const answer = {
+      kind: "fallback",
+      text: "早安！我可以幫你查公司的出勤規定、請假辦法這類問題。",
+      refused: true,
+      sources: [],
+    };
+
+    render(<ChatMessage role="assistant" answer={answer} />);
+
+    expect(screen.getByText(/早安！我可以幫你查公司的出勤規定/)).toBeInTheDocument();
   });
 
   test("拒答時沒有依據 chips", () => {

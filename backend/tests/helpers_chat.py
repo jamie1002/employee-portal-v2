@@ -43,6 +43,10 @@ class FakeGeminiClient:
         self.embed_query_calls = 0
         self.embed_documents_calls = 0
         self.generate_calls = 0
+        # 記錄每次 generate 收到的 (system_instruction, user_content)，讓測試能斷言
+        # 落空路徑走的是受限的 FALLBACK_PROMPT 而不是政策問答的 SYSTEM_PROMPT——
+        # 用錯 prompt 等於讓模型在沒有檢索依據的情況下談政策，是幻覺風險的來源。
+        self.generate_calls_args: list[tuple[str, str]] = []
 
     async def embed_query(self, text: str) -> list[float]:
         self.embed_query_calls += 1
@@ -56,6 +60,7 @@ class FakeGeminiClient:
 
     async def generate(self, system_instruction: str, user_content: str, tools=None) -> str:
         self.generate_calls += 1
+        self.generate_calls_args.append((system_instruction, user_content))
         if self.generate_error is not None:
             raise self.generate_error
         return self.generate_text

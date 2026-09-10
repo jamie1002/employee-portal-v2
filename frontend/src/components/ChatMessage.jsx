@@ -1,33 +1,14 @@
 import { SimpleMarkdown } from "./SimpleMarkdown";
 import { prepareChatMarkdown } from "../utils/chatMarkdown";
 
-// 目前只有 "policy" 一種 kind（政策問答）。批 B 加入個人資料查詢工具時，這裡會依
-// answer.kind 分支渲染不同的呈現方式，政策分支維持原封不動（見
-// openspec/changes/add-policy-chat/design.md「為批 B 鋪路」）。
-function PolicyAnswer({ answer }) {
-  const { body, citations } = prepareChatMarkdown(answer.text);
-
-  return (
-    <div className="space-y-2">
-      <SimpleMarkdown source={body} />
-      {citations.length > 0 && (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {citations.map((citation) => (
-            <span
-              key={citation}
-              className="rounded-full border border-accent-500/50 bg-surface-800 px-2.5 py-1 text-xs text-accent-400"
-            >
-              依據：{citation}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function ChatMessage({ role, answer, text }) {
   const isUser = role === "user";
+
+  // 「— 依據：」那幾行**一律剝除不顯示**。模型仍然被要求輸出它（系統提示規則 4），
+  // 因為那是 eval「引用率 100%」門檻用來自動驗證「答案確實有所本、不是模型瞎編」
+  // 的唯一機制；但對使用者來說，每則回答後面掛一行「根據某文件第幾節」不像人在
+  // 對話，比較像查字典，所以只留在後端資料裡給開發與驗證用。
+  const bodyText = isUser ? text : prepareChatMarkdown(answer.text).body;
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -36,13 +17,7 @@ export default function ChatMessage({ role, answer, text }) {
           isUser ? "bg-accent-500/20 text-text-primary" : "glass-panel text-text-secondary"
         }`}
       >
-        {isUser ? (
-          <p className="text-text-primary">{text}</p>
-        ) : answer.kind === "policy" ? (
-          <PolicyAnswer answer={answer} />
-        ) : (
-          <p>{answer.text}</p>
-        )}
+        {isUser ? <p className="text-text-primary">{bodyText}</p> : <SimpleMarkdown source={bodyText} />}
       </div>
     </div>
   );

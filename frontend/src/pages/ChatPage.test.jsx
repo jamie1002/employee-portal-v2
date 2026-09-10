@@ -30,7 +30,10 @@ test("送出問題後顯示回答與依據來源", async () => {
   fireEvent.click(screen.getByRole("button", { name: "送出" }));
 
   expect(await screen.findByText(/特別休假滿一年可休 7 日/)).toBeInTheDocument();
-  expect(screen.getByText(/依據：leave-policy.md 2.1 特別休假級距/)).toBeInTheDocument();
+  // 「— 依據：」一律不顯示給使用者：模型仍會輸出（eval 靠它驗證答案有所本），
+  // 但那是給開發與自動驗證看的，掛在對話裡不像人在講話。
+  expect(screen.queryByText(/依據：/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/leave-policy\.md/)).not.toBeInTheDocument();
   expect(mockAskChat).toHaveBeenCalledWith("特別休假怎麼算？");
 });
 

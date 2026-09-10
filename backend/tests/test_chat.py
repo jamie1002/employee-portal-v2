@@ -5,7 +5,7 @@ import pytest
 
 from app.config.settings import app_settings
 from app.repositories import policy_repository
-from app.services import policy_retrieval
+from app.services import chat_prompt, policy_retrieval
 from tests.helpers import login_headers
 from tests.helpers_chat import (  # noqa: F401 — _reset_rate_limit 需被 import 才會 autouse 生效
     FakeGeminiClient,
@@ -63,20 +63,61 @@ async def test_question_too_long_returns_400(client, use_fake_chat_client, monke
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-async def test_empty_retrieval_returns_200_refused_without_calling_llm(
+async def test_empty_retrieval_uses_restricted_fallback_prompt(
     client, pool, use_fake_chat_client, clean_policy_embeddings
 ):
+    """檢索落空時走受限的 FALLBACK_PROMPT，讓「早安」、情緒抱怨這類輸入能得到
+    自然回應，而不是一句制式拒答。**關鍵斷言是「用的是哪一個 prompt」**：落空
+    路徑沒有任何檢索依據，若誤用政策問答的 SYSTEM_PROMPT，模型就會在沒有依據的
+    情況下談規定，那正是幻覺的來源。"""
     fake_client = FakeGeminiClient()  # policy_embeddings 為空，檢索結果必為空
     use_fake_chat_client(fake_client)
     headers = await login_headers(client, "employee@demo.com")
 
-    response = await client.post("/api/chat", headers=headers, json={"question": "任意問題"})
+    response = await client.post("/api/chat", headers=headers, json={"question": "早安"})
 
     assert response.status_code == 200
     body = response.json()["answer"]
+    assert body["kind"] == "fallback"
     assert body["refused"] is True
     assert body["sources"] == []
-    assert fake_client.generate_calls == 0
+
+    assert fake_client.generate_calls == 1
+    system_instruction, _ = fake_client.generate_calls_args[0]
+    assert system_instruction == chat_prompt.FALLBACK_PROMPT
+    assert system_instruction != chat_prompt.SYSTEM_PROMPT
+
+
+async def test_answer_prompt_includes_live_attendance_settings(
+    client, pool, use_fake_chat_client, clean_policy_embeddings
+):
+    """推算的基準必須是系統即時生效的設定，不是語料寫死的預設值——admin 改過
+    考勤設定之後，語料還停在 09:00／10 分鐘，模型若照語料推算就會給出錯誤答案。"""
+    query_vector = make_unit_vector([1.0])
+    await _seed_one_matching_chunk(pool, query_vector)
+    fake_client = FakeGeminiClient(query_vector=query_vector)
+    use_fake_chat_client(fake_client)
+
+    admin_headers = await login_headers(client, "admin@demo.com")
+    await client.put(
+        "/api/settings",
+        headers=admin_headers,
+        json={
+            "work_start_time": "08:30",
+            "work_end_time": "17:30",
+            "lunch_start_time": "12:30",
+            "lunch_end_time": "13:30",
+            "grace_period_minutes": 15,
+        },
+    )
+
+    headers = await login_headers(client, "employee@demo.com")
+    response = await client.post("/api/chat", headers=headers, json={"question": "幾點算遲到？"})
+
+    assert response.status_code == 200
+    _, user_content = fake_client.generate_calls_args[0]
+    assert "08:30" in user_content
+    assert "15 分鐘" in user_content
 
 
 async def test_normal_response_includes_sources(client, pool, use_fake_chat_client, clean_policy_embeddings):
