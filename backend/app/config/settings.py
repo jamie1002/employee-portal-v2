@@ -29,9 +29,17 @@ class AppSettings(BaseSettings):
     # AI 政策問答（批 A）。留空即視為未啟用——GOOGLE_API_KEY 是唯一的啟用開關，
     # 見 chat_enabled property 與 openspec/changes/add-policy-chat/design.md。
     GOOGLE_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    # 實測 gemini-3.5-flash-lite 的延遲抖動極大（同一支程式、同一組輸入量到
+    # 1.5～52.7 秒，還會直接逾時），gemini-3.1-flash-lite 則穩定在 2～9 秒，
+    # 品質經 77 題 eval 驗證無退步，因此選它（見 docs/PITFALLS.md I11）。
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite"
+    # 只作用在批次作業（ingest／eval）；互動式問答刻意不節流，配額保護交給
+    # CHAT_RATE_LIMIT_PER_MINUTE（明確回 429 遠比默默拖慢每次回答誠實）。
     GEMINI_REQUESTS_PER_MINUTE: float = 10
-    GEMINI_TIMEOUT_SECONDS: float = 25
+    # 換掉抖動的模型之後，實測落在 2～9 秒，40 秒是留給偶發長尾的餘裕。
+    GEMINI_TIMEOUT_SECONDS: float = 40
+    # 影響用詞隨機性，不是「語氣溫暖度」。調整必須重跑 eval，見 utils/gemini.py。
+    GEMINI_TEMPERATURE: float = 0.3
     EMBEDDING_MODEL: str = "models/gemini-embedding-001"
     EMBEDDING_DIM: int = 768
     RETRIEVAL_TOP_K: int = 5

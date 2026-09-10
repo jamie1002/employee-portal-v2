@@ -32,7 +32,7 @@ _TASK_TYPE_DOCUMENT = "retrieval_document"
 _TASK_TYPE_QUERY = "retrieval_query"
 
 _throttle_lock = asyncio.Lock()
-_last_call_at = 0.0
+_last_call_at: dict[str, float] = {}
 
 
 class GeminiUnavailable(RuntimeError):
@@ -61,30 +61,53 @@ def _check_dimension(vector: list[float]) -> None:
         )
 
 
-async def _throttle() -> None:
-    """行程級 RPM 節流：確保呼叫間隔至少 60 / GEMINI_REQUESTS_PER_MINUTE 秒。
+async def _throttle(key: str) -> None:
+    """行程級 RPM 節流：確保同一種呼叫類型的間隔至少 60 / GEMINI_REQUESTS_PER_MINUTE 秒。
 
     免費層每分鐘請求數有上限，主動放慢呼叫節奏，寧可慢一點也不要撞 429 後在使用者的
-    請求路徑上長時間重試。"""
-    global _last_call_at
+    請求路徑上長時間重試。
+
+    **`key` 依呼叫類型（`"embedding"` / `"generate"`）各自獨立計時**：embedding 與
+    生成呼叫的是 Gemini 不同的模型端點，各自有獨立的配額桶，共用同一個全域計時器
+    會讓單次問答內部「先 embed 再 generate」這兩次呼叫互相排隊——使用者會被迫多等
+    一個節流間隔，卻誤以為是模型在思考（見 `docs/PITFALLS.md`）。
+
+    等待動作刻意放在鎖外執行，鎖只保護「查詢並登記下一個時間槽」這個極短的臨界區，
+    避免某一種呼叫的等待時間把其他呼叫（含不同 key、或並行的其他使用者請求）一併
+    卡住。"""
     rpm = app_settings.GEMINI_REQUESTS_PER_MINUTE
     if rpm <= 0:
         return
     min_interval = 60.0 / rpm
     async with _throttle_lock:
         now = time.monotonic()
-        wait = _last_call_at + min_interval - now
-        if wait > 0:
-            await asyncio.sleep(wait)
-        _last_call_at = time.monotonic()
+        last = _last_call_at.get(key, 0.0)
+        wait = max(0.0, last + min_interval - now)
+        _last_call_at[key] = now + wait
+    if wait > 0:
+        await asyncio.sleep(wait)
 
 
 class GeminiClient:
     """單次請求可重用的 Gemini client。`generate()` 的 `tools` 參數是為批 B 的
-    function calling 預留的位子，批 A 恆傳 `None`。"""
+    function calling 預留的位子，批 A 恆傳 `None`。
 
-    def __init__(self) -> None:
+    **`throttled` 預設 True，但互動式問答（`/api/chat`）刻意傳 False**：節流是
+    為了保護免費層配額，代價是每次呼叫之間強制等待 `60 / RPM` 秒。這個代價對
+    「連續跑 72 題的 eval」或「一次灌 61 個 chunk 的 ingest」是划算的（慢一點
+    無所謂），但對真人互動式問答是純粹的體驗傷害——使用者每問一題就被迫多等
+    數秒，卻不知道系統在等什麼。互動路徑的配額保護改由
+    `CHAT_RATE_LIMIT_PER_MINUTE`（每使用者每分鐘上限，超過直接回 429）負責：
+    明確拒絕比默默拖延誠實得多（見 `docs/PITFALLS.md` I8）。
+    """
+
+    def __init__(self, throttled: bool = True) -> None:
         genai.configure(api_key=app_settings.GOOGLE_API_KEY)
+        self._throttled = throttled
+
+    async def _maybe_throttle(self, key: str) -> None:
+        if self._throttled:
+            await _throttle(key)
 
     async def _with_timeout(self, coro: Any) -> Any:
         try:
@@ -102,7 +125,7 @@ class GeminiClient:
             return []
 
         async def _call() -> list[list[float]]:
-            await _throttle()
+            await self._maybe_throttle("embedding")
             response = await genai.embed_content_async(
                 model=app_settings.EMBEDDING_MODEL,
                 content=texts,
@@ -120,7 +143,7 @@ class GeminiClient:
         """把使用者的查詢文字轉成向量。task_type 刻意與 embed_documents 不同。"""
 
         async def _call() -> list[float]:
-            await _throttle()
+            await self._maybe_throttle("embedding")
             response = await genai.embed_content_async(
                 model=app_settings.EMBEDDING_MODEL,
                 content=text,
@@ -134,25 +157,36 @@ class GeminiClient:
         return vector
 
     async def generate(self, system_instruction: str, user_content: str, tools: Any = None) -> str:
-        """呼叫生成模型，`temperature=0` 求輸出穩定。"""
+        """呼叫生成模型。
+
+        `temperature` 走 `GEMINI_TEMPERATURE` 設定值。**這個值與「回答語氣溫暖與否」
+        沒有直接關係**（那是系統提示措辭決定的），它影響的是用詞的隨機性；調高有機會
+        讓措辭略微自然，但也會讓輸出更不穩定——規則 2（數字必須有依據）這類需要精確
+        遵守的約束，temperature 越高越容易被模型「順口」帶過。任何調整都必須重跑
+        `npm run eval:chat` 確認六項門檻仍然全綠，不能只憑讀起來的感覺。"""
 
         async def _call() -> str:
-            await _throttle()
+            await self._maybe_throttle("generate")
             model = genai.GenerativeModel(
                 model_name=app_settings.GEMINI_MODEL,
                 system_instruction=system_instruction,
             )
             response = await model.generate_content_async(
                 user_content,
-                generation_config=genai.types.GenerationConfig(temperature=0),
+                generation_config=genai.types.GenerationConfig(
+                    temperature=app_settings.GEMINI_TEMPERATURE
+                ),
             )
             return response.text
 
         return await self._with_timeout(_call())
 
 
-def get_gemini_client() -> GeminiClient:
-    """惰性建構 client。沒有設定金鑰時直接拋 GeminiUnavailable，呼叫端負責轉譯。"""
+def get_gemini_client(throttled: bool = True) -> GeminiClient:
+    """惰性建構 client。沒有設定金鑰時直接拋 GeminiUnavailable，呼叫端負責轉譯。
+
+    `throttled=False` 供互動式問答路徑使用（見 `GeminiClient` 的說明）；
+    ingest 與 eval 這類批次作業維持預設的節流。"""
     if not app_settings.chat_enabled:
         raise GeminiUnavailable("尚未設定 GOOGLE_API_KEY，AI 助理目前無法使用。")
-    return GeminiClient()
+    return GeminiClient(throttled=throttled)

@@ -18,7 +18,9 @@ async def get_chat_client() -> GeminiClient:
     `RuntimeError` 不是 `AppError`，若不在這裡攔截轉譯，會被 unhandled exception
     handler 吃成未分類的 500——這裡就是那唯一的轉譯點。"""
     try:
-        return get_gemini_client()
+        # throttled=False：互動路徑不做主動節流，配額保護由 CHAT_RATE_LIMIT_PER_MINUTE
+        # 負責（見 utils/gemini.py 的 GeminiClient 說明）。
+        return get_gemini_client(throttled=False)
     except GeminiUnavailable as exc:
         raise AppError(503, str(exc), "CHAT_UNAVAILABLE") from exc
 
