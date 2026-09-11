@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import google.generativeai as genai
@@ -33,6 +34,42 @@ _TASK_TYPE_QUERY = "retrieval_query"
 
 _throttle_lock = asyncio.Lock()
 _last_call_at: dict[str, float] = {}
+
+
+@dataclass
+class ToolCall:
+    """模型要求呼叫的工具。`name` 未經驗證——模型有可能喊出一個不存在、或它這個角色
+    不該擁有的工具名稱，驗證是 service 層的責任（見 design.md Decision 2）。"""
+
+    name: str
+    args: dict
+
+
+@dataclass
+class ToolTurn:
+    """帶工具那一輪的結果：要嘛模型要求呼叫工具，要嘛直接給了文字。
+
+    `raw_content` 與 `user_content` 是把工具結果送回模型時要重建對話歷史用的，
+    呼叫端不需要理解它們的內容。
+    """
+
+    calls: list[ToolCall]
+    text: str
+    raw_content: Any
+    user_content: str
+
+
+def _to_tool_turn(response: Any, user_content: str) -> ToolTurn:
+    parts = response.candidates[0].content.parts
+    calls = [
+        ToolCall(name=part.function_call.name, args={k: v for k, v in part.function_call.args.items()})
+        for part in parts
+        if part.function_call and part.function_call.name
+    ]
+    # 有工具呼叫時 response.text 會拋例外（SDK 不允許對非純文字回應取 text），
+    # 所以只在沒有呼叫時才取文字。
+    text = "".join(part.text for part in parts if part.text) if not calls else ""
+    return ToolTurn(calls=calls, text=text, raw_content=response.candidates[0].content, user_content=user_content)
 
 
 class GeminiUnavailable(RuntimeError):
@@ -173,6 +210,78 @@ class GeminiClient:
             )
             response = await model.generate_content_async(
                 user_content,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=app_settings.GEMINI_TEMPERATURE
+                ),
+            )
+            return response.text
+
+        return await self._with_timeout(_call())
+
+    async def generate_with_tools(
+        self, system_instruction: str, user_content: str, tools: list[Any]
+    ) -> ToolTurn:
+        """帶著工具清單呼叫模型，回傳「要呼叫哪些工具」或「最終文字」。
+
+        **這一層刻意不決定要不要執行工具，也不執行它們**——工具的權限判斷與派工屬於
+        service 層（`services/chat_tools.py`）。SDK 封裝若順手把工具執行掉，授權敏感的
+        控制流就藏進了這支通用工具函式裡，之後沒有人會想到要來這裡檢查權限。
+        """
+
+        async def _call() -> ToolTurn:
+            await self._maybe_throttle("generate")
+            model = genai.GenerativeModel(
+                model_name=app_settings.GEMINI_MODEL,
+                system_instruction=system_instruction,
+                tools=tools,
+            )
+            response = await model.generate_content_async(
+                user_content,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=app_settings.GEMINI_TEMPERATURE
+                ),
+            )
+            return _to_tool_turn(response, user_content)
+
+        return await self._with_timeout(_call())
+
+    async def continue_with_tool_results(
+        self,
+        system_instruction: str,
+        tools: list[Any],
+        turn: ToolTurn,
+        results: list[tuple[str, dict]],
+    ) -> str:
+        """把工具執行結果送回模型，取得最終的文字回答。
+
+        `results` 的順序必須與 `turn.calls` 一一對應。刻意不允許在這裡再吐出新的工具
+        呼叫——次數上限由 service 層控制（見 design.md Decision 6）。
+        """
+
+        async def _call() -> str:
+            await self._maybe_throttle("generate")
+            model = genai.GenerativeModel(
+                model_name=app_settings.GEMINI_MODEL,
+                system_instruction=system_instruction,
+                tools=tools,
+            )
+            history = [
+                {"role": "user", "parts": [turn.user_content]},
+                turn.raw_content,
+                {
+                    "role": "user",
+                    "parts": [
+                        genai.protos.Part(
+                            function_response=genai.protos.FunctionResponse(
+                                name=name, response={"result": payload}
+                            )
+                        )
+                        for name, payload in results
+                    ],
+                },
+            ]
+            response = await model.generate_content_async(
+                history,
                 generation_config=genai.types.GenerationConfig(
                     temperature=app_settings.GEMINI_TEMPERATURE
                 ),

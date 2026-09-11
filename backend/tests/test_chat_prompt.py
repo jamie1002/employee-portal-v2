@@ -77,3 +77,45 @@ def test_build_user_content_preserves_literal_braces_in_context():
 
     assert "{x}" in user_content
     assert "{y}" in user_content
+
+
+# ── 批 B：工具規則的結構性約束 ──────────────────────────────────────────────
+
+def test_first_round_prompt_never_mentions_skipping_the_disclaimer():
+    """**這條測試守的是一次實測出來的退化**：第一版把「工具數字不要加但書」寫進
+    規則 7，結果 77 題 eval 的推算但書從 7/7 掉到 1/7——那句否定句位在提示詞最後，
+    位置上壓過前面的規則 2，模型連純政策推算的答案也不加但書了。
+
+    修法是讓政策路徑結構上看不到那句話。這條測試確保它不會被改回去。
+    """
+    from datetime import date
+
+    first_round = chat_prompt.build_system_prompt(date(2026, 9, 11))
+
+    assert "不要對這些數字加" not in first_round
+    assert chat_prompt.TOOL_RESULT_RULES not in first_round
+    # 規則 2 的但書要求必須還在。
+    assert "以系統顯示為準" in first_round
+
+
+def test_second_round_prompt_adds_the_tool_result_rules():
+    from datetime import date
+
+    second_round = chat_prompt.build_system_prompt(date(2026, 9, 11), with_tool_results=True)
+
+    assert chat_prompt.TOOL_RESULT_RULES in second_round
+
+
+def test_prompt_without_today_falls_back_to_batch_a():
+    """拿不到虛擬時鐘的日期時退回批 A 的提示：沒有「今天」卻叫模型用工具查區間，
+    它只會用自己認知的年份去猜，查出來是空的，然後很自然地說「你那個月沒有紀錄」。"""
+    assert chat_prompt.build_system_prompt(None) == chat_prompt.SYSTEM_PROMPT
+
+
+def test_today_is_rendered_with_weekday():
+    from datetime import date
+
+    prompt = chat_prompt.build_system_prompt(date(2026, 9, 11))
+
+    assert "2026-09-11" in prompt
+    assert "星期五" in prompt

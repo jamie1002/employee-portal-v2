@@ -18,6 +18,7 @@ import pytest_asyncio
 from app.main import app
 from app.routers.chat import get_chat_client
 from app.services import rate_limit
+from app.utils.gemini import ToolCall, ToolTurn
 
 
 def make_unit_vector(prefix: list[float], dim: int = 768) -> list[float]:
@@ -35,7 +36,13 @@ class FakeGeminiClient:
         document_vectors: list[list[float]] | None = None,
         generate_text: str = "測試回答\n\n— 依據：test.md 測試 > 章節",
         generate_error: Exception | None = None,
+        tool_calls: list[ToolCall] | None = None,
+        tool_answer_text: str = "你這個月遲到 2 次。",
     ) -> None:
+        self.tool_calls = tool_calls or []
+        self.tool_answer_text = tool_answer_text
+        self.continue_calls = 0
+        self.tool_results_seen: list = []
         self.query_vector = query_vector if query_vector is not None else make_unit_vector([1.0])
         self.document_vectors = document_vectors or []
         self.generate_text = generate_text
@@ -64,6 +71,27 @@ class FakeGeminiClient:
         if self.generate_error is not None:
             raise self.generate_error
         return self.generate_text
+
+    async def generate_with_tools(self, system_instruction: str, user_content: str, tools) -> ToolTurn:
+        """預設不呼叫任何工具（等同批 A 的單輪行為）。要模擬工具呼叫時，
+        把 `tool_calls` 設成 `[ToolCall(name=..., args=...)]`。"""
+        self.generate_calls += 1
+        self.generate_calls_args.append((system_instruction, user_content))
+        if self.generate_error is not None:
+            raise self.generate_error
+        return ToolTurn(
+            calls=list(self.tool_calls),
+            text="" if self.tool_calls else self.generate_text,
+            raw_content=None,
+            user_content=user_content,
+        )
+
+    async def continue_with_tool_results(self, system_instruction, tools, turn, results) -> str:
+        self.continue_calls += 1
+        self.tool_results_seen = results
+        if self.generate_error is not None:
+            raise self.generate_error
+        return self.tool_answer_text
 
 
 @pytest.fixture

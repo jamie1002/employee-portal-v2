@@ -63,9 +63,10 @@ if sys.platform == "win32":
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.config.database import create_pool  # noqa: E402
+from app.config.database import create_pool, set_pool  # noqa: E402
 from app.config.settings import app_settings  # noqa: E402
 from app.repositories import policy_repository  # noqa: E402
+from app.services import chat as chat_service  # noqa: E402
 from app.services import chat_prompt  # noqa: E402
 from app.services import settings as settings_service  # noqa: E402
 from app.services.leave_hours import calculate_leave_hours, calculate_overtime_hours  # noqa: E402
@@ -87,6 +88,11 @@ _QUOTA_RETRY_WAIT = 30
 
 # 檢索落空的內部標記：eval 不為這條路徑呼叫 API（見下方說明）。
 _NO_CONTEXT_MARKER = "（檢索落空，未呼叫政策問答生成）"
+
+# 跑政策題時模擬的身分。用 employee 是刻意的**最保守選擇**：它拿到的工具清單最小，
+# 代表大多數使用者的實際情境。若日後新增以主管／管理員身分驗證的權限題組，
+# 那一組必須各自帶自己的身分，不要共用這一個。
+_EVAL_USER = {"id": 3, "role": "employee", "department_id": 1}
 
 # 推算型答案必須附上的但書。措辭不強制統一，只要有表達「以系統實際顯示為準」
 # 的意思即可，所以比對幾種常見說法而不是單一字串。
@@ -298,7 +304,13 @@ async def run_eval(
                     user_content = chat_prompt.build_user_content(
                         usable, item["question"], live_settings
                     )
-                    generated_text = await client.generate(chat_prompt.SYSTEM_PROMPT, user_content)
+                    # **必須走正式環境的同一支函式**：批 B 之後模型是帶著工具清單被呼叫的，
+                    # 而工具清單會改變它在政策問題上的措辭（探針實測，見 design.md Step 0）。
+                    # eval 若自己組一次不帶工具的 generate()，這 77 題就證明不了正式路徑
+                    # 有沒有退化——而那正是批 B 唯一的硬性驗收條件。
+                    generated_text, _ = await chat_service.answer_with_tools(
+                        pool, client, _EVAL_USER, user_content
+                    )
                     break
                 except GeminiUnavailable as exc:
                     # 這個迴圈內能拋出 GeminiUnavailable 的原因（逾時、429、網路暫時性錯誤）
@@ -573,6 +585,9 @@ async def _main_async(args: argparse.Namespace) -> bool:
         questions = questions[: args.limit]
 
     pool = await create_pool(app_settings.DATABASE_URL)
+    # 同時註冊成全域連線池：正式路徑的 `answer_with_tools()` 會經由 `get_virtual_now()`
+    # 取用它來解析「今天」。少了這行，eval 會在第一題就因為連線池未初始化而中止。
+    set_pool(pool)
     try:
         results, corpus = await run_eval(pool, questions, with_generation=not args.skip_generation)
     finally:

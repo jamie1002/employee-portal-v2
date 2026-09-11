@@ -48,6 +48,13 @@ class AppSettings(BaseSettings):
     RETRIEVAL_MIN_SCORE: float = 0.65
     CHAT_RATE_LIMIT_PER_MINUTE: int = 10
     CHAT_MAX_QUESTION_CHARS: int = 500
+    # 整趟問答的上限。GEMINI_TIMEOUT_SECONDS 管的是「單次呼叫」，帶工具時一次提問
+    # 會有兩次呼叫，最壞情況會變成 80 秒——使用者等到那麼久才看到失敗訊息是無法接受
+    # 的（等待時間是這個功能實測最大的體驗痛點，見 docs/PITFALLS.md I11）。
+    CHAT_TOTAL_TIMEOUT_SECONDS: float = 60
+    # 模型最多能要求幾輪工具呼叫。本批次的工具都是單步可答，設 1 就夠；留成設定值
+    # 是因為 lite 模型偶爾會重複呼叫同一支工具，沒有上界就是配額絞肉機。
+    CHAT_MAX_TOOL_ROUNDS: int = 1
 
     @property
     def cors_origins_list(self) -> list[str]:
