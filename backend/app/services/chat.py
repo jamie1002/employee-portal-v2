@@ -127,9 +127,14 @@ async def answer_with_tools(
     if not turn.calls:
         return turn.text, []
 
-    # 上限為 1 輪：本批次的工具都是單步可答的。沒有上界時 lite 模型偶爾會重複呼叫
-    # 同一支工具，變成配額絞肉機而且使用者一直等不到答案。
-    calls = turn.calls[: app_settings.CHAT_MAX_TOOL_ROUNDS * len(tools[0].function_declarations)]
+    # **結構上就只有一輪**：拿到結果後直接要文字回答，不再給模型第二次呼叫工具的機會。
+    # 本批次的工具都是單步可答的，需要的資訊 current_user 裡都有。沒有這個上界時，
+    # lite 模型偶爾會重複呼叫同一支工具，變成配額絞肉機而且使用者一直等不到答案。
+    #
+    # 同一輪內模型可以要求呼叫多支工具，但最多就是每支工具各一次——再多必然是重複，
+    # 執行它們只是白白多打幾次資料庫。
+    max_calls = len(tools[0].function_declarations)
+    calls = turn.calls[:max_calls]
     results = [
         (call.name, await chat_tools.execute(pool, current_user, call.name, call.args))
         for call in calls

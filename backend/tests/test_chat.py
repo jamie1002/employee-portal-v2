@@ -318,3 +318,22 @@ async def test_system_prompt_carries_virtual_today(client, pool, use_fake_chat_c
     today = get_business_date(virtual_now, tz=app_settings.APP_TIMEZONE)
     assert today.isoformat() in system_instruction
     assert "規則 7" in system_instruction
+
+
+async def test_tool_round_trip_happens_exactly_once(client, pool, use_fake_chat_client, clean_policy_embeddings):
+    """工具往返只有一輪，而且是結構性的：拿到結果就要文字回答，不再給模型第二次
+    呼叫工具的機會。lite 模型偶爾會重複呼叫同一支工具，沒有這個上界就是配額絞肉機。"""
+    query_vector = make_unit_vector([1.0])
+    await _seed_one_matching_chunk(pool, query_vector)
+    fake_client = FakeGeminiClient(
+        query_vector=query_vector,
+        tool_calls=[ToolCall(name="get_today_status", args={})],
+    )
+    use_fake_chat_client(fake_client)
+    headers = await login_headers(client, "employee@demo.com")
+
+    await client.post("/api/chat", headers=headers, json={"question": "我今天打卡了嗎"})
+
+    # 一次帶工具的生成 + 一次送回結果，就這樣。
+    assert fake_client.generate_calls == 1
+    assert fake_client.continue_calls == 1

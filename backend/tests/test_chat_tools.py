@@ -184,3 +184,17 @@ async def test_employee_cannot_reach_other_users_data(pool, db):
         pool, EMPLOYEE_ID, start_date=WEDNESDAY, end_date=WEDNESDAY, page_size=1000
     )
     assert result["總天數"] == mine["total"]
+
+
+async def test_tool_layer_writes_no_sql(pool):
+    """工具層不得自行撰寫查詢。業務資料一律經既有 service 取得——出勤的「生效值」
+    不是 attendances 表讀得到的，繞過去的答案會跟畫面對不上而且不會報錯。
+
+    （單純的主鍵查表走 repository 是 service 層的正常作法，不在此限。）
+    """
+    import inspect
+
+    source = inspect.getsource(chat_tools)
+
+    for forbidden in ("pool.fetch", "pool.execute", "pool.fetchrow", "pool.fetchval", "SELECT "):
+        assert forbidden not in source, f"chat_tools 不應出現 {forbidden}"

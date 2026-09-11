@@ -24,6 +24,7 @@ import google.generativeai as genai
 from app.config.settings import app_settings
 from app.repositories import user_repository
 from app.services import attendance as attendance_service
+from app.services import department as department_service
 from app.services import leave_quota as leave_quota_service
 from app.services import leave_request, overtime_request, punch_request
 from app.services import settings as settings_service
@@ -103,6 +104,48 @@ def _personal_declarations() -> list[genai.protos.FunctionDeclaration]:
     ]
 
 
+def _team_declarations(role: str) -> list[genai.protos.FunctionDeclaration]:
+    """主管與管理員才看得到的兩支工具。
+
+    `department_name` **只出現在 admin 的宣告裡**：主管的可見範圍恆等於自己的部門，
+    給他一個部門參數只會誘導模型去填一個注定被拒絕的值，白白多一輪往返。
+    """
+    team_properties = {
+        "start_date": _string("起始日期，格式 YYYY-MM-DD"),
+        "end_date": _string("結束日期，格式 YYYY-MM-DD"),
+        "employee_name": _string(
+            "要查詢的同事姓名，例如「陳小華」。**用姓名，不要用任何編號。**"
+            "省略表示查詢範圍內的所有人。"
+        ),
+        "status": _string(
+            "只看某一種狀態時填入，可填 normal、late、absent、early_leave、"
+            "on_leave、missing_punch_out。省略表示全部狀態。"
+        ),
+    }
+    scope_hint = "所屬部門成員"
+    if role == "admin":
+        team_properties["department_name"] = _string(
+            "部門名稱，例如「研發部」。**用部門名稱，不要用編號。**省略表示全公司。"
+        )
+        scope_hint = "全公司或指定部門的成員"
+
+    return [
+        _declaration(
+            "get_pending_reviews",
+            "查詢「等著提問者去審核別人」的申請單，也就是提問者是審核者的那些單子。"
+            "這與提問者自己送出的申請單（get_my_requests）是不同的東西。",
+            {"kind": _string("申請類型，可填 leave、overtime、punch。省略表示三種都查。")},
+        ),
+        _declaration(
+            "get_team_attendance_summary",
+            f"查詢{scope_hint}的出勤統計，會依每個人分別列出出勤天數、遲到次數、"
+            "早退次數與缺勤天數，適合回答「誰遲到最多」這類問題。",
+            team_properties,
+            ["start_date", "end_date"],
+        ),
+    ]
+
+
 def build_declarations(current_user: dict) -> list[genai.protos.Tool]:
     """依角色組裝工具宣告。
 
@@ -110,6 +153,8 @@ def build_declarations(current_user: dict) -> list[genai.protos.Tool]:
     真正的安全邊界在 `execute()`。
     """
     declarations = _personal_declarations()
+    if current_user["role"] in ("manager", "admin"):
+        declarations += _team_declarations(current_user["role"])
     return [genai.protos.Tool(function_declarations=declarations)]
 
 
@@ -276,7 +321,101 @@ async def _dispatch(pool: asyncpg.Pool, current_user: dict, name: str, args: dic
             items.extend({**_project_request(row), "類型": one} for row in rows)
         return {"ok": True, "申請單": items[:_MAX_DETAIL_ROWS * 2], "總筆數": len(items)}
 
+    if name == "get_pending_reviews":
+        kind = _clean_optional(args.get("kind"))
+        kinds = [kind] if kind in _REQUEST_SERVICES else list(_REQUEST_SERVICES)
+        items = []
+        for one in kinds:
+            # get_pending() 自己依 reviewer 的角色限縮（admin 全公司、manager 同部門
+            # 且排除自己送出的單），這裡不再自行判斷範圍。
+            rows = await _REQUEST_SERVICES[one].get_pending(pool, current_user)
+            items.extend(
+                {**_project_request(row), "類型": one, "申請人": row.get("applicant_name"),
+                 "部門": row.get("department_name")}
+                for row in rows
+            )
+        return {"ok": True, "待審申請單": items[: _MAX_DETAIL_ROWS * 2], "總筆數": len(items)}
+
+    if name == "get_team_attendance_summary":
+        start_date = _parse_date(args.get("start_date"), "起始日期")
+        end_date = _parse_date(args.get("end_date"), "結束日期")
+        if start_date > end_date:
+            raise _ToolArgumentError("起始日期不能晚於結束日期。")
+
+        target_user_id = await _resolve_employee_name(pool, _clean_optional(args.get("employee_name")))
+        department_id = None
+        if current_user["role"] == "admin":
+            department_id = await _resolve_department_name(
+                pool, _clean_optional(args.get("department_name"))
+            )
+
+        # 範圍限縮完全交給 attendance.get_all()（內部走 attendance_scope）：主管指定
+        # 他部門的同事時會在這裡拋 403，被 execute() 轉成拒絕訊息。姓名只是輸入格式，
+        # 不是繞過權限的管道。
+        records = await attendance_service.get_all(
+            pool, current_user, user_id=target_user_id, department_id=department_id,
+            start_date=start_date, end_date=end_date, status=_clean_optional(args.get("status")),
+        )
+        summary = _summarize_team_attendance(records)
+        summary["查詢區間"] = f"{start_date.isoformat()} 至 {end_date.isoformat()}"
+        return summary
+
     return _refusal("我目前沒有辦法查詢這項資料。")
+
+
+async def _resolve_employee_name(pool: asyncpg.Pool, employee_name: str | None) -> int | None:
+    """把姓名解析成 user_id。
+
+    查無此人與同名多筆**各自回不同的訊息，絕不任選一筆**——任選一筆會讓助理拿著
+    甲的資料回答關於乙的問題，數字全錯而且不會有任何錯誤訊息。
+    """
+    if employee_name is None:
+        return None
+
+    members = await user_repository.find_all(pool)
+    matched = [row for row in members if row["name"] == employee_name]
+    if not matched:
+        raise _ToolArgumentError(f"找不到名字是「{employee_name}」的同事。")
+    if len(matched) > 1:
+        raise _ToolArgumentError(
+            f"有多位同事都叫「{employee_name}」，請改用系統的出勤查詢頁指定是哪一位。"
+        )
+    return matched[0]["id"]
+
+
+async def _resolve_department_name(pool: asyncpg.Pool, department_name: str | None) -> int | None:
+    if department_name is None:
+        return None
+
+    departments = await department_service.list_departments(pool)
+    matched = [row for row in departments if row["name"] == department_name]
+    if not matched:
+        raise _ToolArgumentError(f"找不到名稱是「{department_name}」的部門。")
+    return matched[0]["id"]
+
+
+def _summarize_team_attendance(records: list[dict]) -> dict:
+    """依「人」聚合，讓「誰遲到最多」這類問題有得答。
+
+    不回原始列：一個部門一個月就有數百列，全部餵回模型會讓第二輪的輸入暴增，
+    而且模型自己數一定會跟畫面上的統計對不起來（見 design.md Decision 4）。
+    """
+    by_person: dict[str, dict] = {}
+    for row in records:
+        person = row.get("user_name") or "（未知）"
+        entry = by_person.setdefault(
+            person,
+            {"姓名": person, "部門": row.get("department_name"), "出勤天數": 0,
+             "遲到次數": 0, "早退次數": 0, "缺勤天數": 0, "請假天數": 0},
+        )
+        entry["出勤天數"] += 1
+        for label, key in (("遲到次數", "late"), ("早退次數", "early_leave"),
+                           ("缺勤天數", "absent"), ("請假天數", "on_leave")):
+            if attendance_service.matches_status_filter(row, key):
+                entry[label] += 1
+
+    people = sorted(by_person.values(), key=lambda e: e["遲到次數"], reverse=True)
+    return {"ok": True, "人數": len(people), "總筆數": len(records), "各人統計": people}
 
 
 def _clean_optional(value: object) -> str | None:
