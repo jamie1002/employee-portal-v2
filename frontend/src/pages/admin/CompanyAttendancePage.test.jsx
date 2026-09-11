@@ -45,11 +45,46 @@ beforeEach(() => {
   mockGetDemoClock.mockReset().mockResolvedValue({ virtual_now: "2026-08-24T01:00:00+00:00" }); // 台北 08/24 09:00
 });
 
-test("非 admin 完全不渲染頁面內容（RoleGate）", () => {
+test("一般員工完全不渲染頁面內容（RoleGate）", () => {
   mockUser = { id: 3, name: "陳小華", role: "employee", permissions: [] };
   render(<CompanyAttendancePage />);
 
   expect(screen.queryByText("全公司出勤")).not.toBeInTheDocument();
+  expect(screen.queryByText("部門出勤")).not.toBeInTheDocument();
+});
+
+test("主管看到的標題是「部門出勤」，部門欄位鎖成唯讀的自己部門", async () => {
+  mockUser = { id: 2, name: "王小明", role: "manager", department_id: 1, permissions: [] };
+  render(<CompanyAttendancePage />);
+
+  expect(await screen.findByText("部門出勤")).toBeInTheDocument();
+  expect(screen.queryByText("全公司出勤")).not.toBeInTheDocument();
+
+  // 唯讀標籤顯示自己的部門名稱，而不是可切換的下拉。用 getByLabelText 斷言，
+  // 順便守住「label 與 output 的關聯沒斷」——換成 <p> 會讓這條斷言失敗。
+  await waitFor(() => expect(screen.getByLabelText("部門")).toHaveTextContent("研發部"));
+  expect(screen.queryByRole("option", { name: "全公司" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "業務部" })).not.toBeInTheDocument();
+});
+
+test("主管的員工下拉只列出同部門成員", async () => {
+  mockUser = { id: 2, name: "王小明", role: "manager", department_id: 1, permissions: [] };
+  render(<CompanyAttendancePage />);
+
+  await waitFor(() => expect(screen.getByLabelText("部門")).toHaveTextContent("研發部"));
+
+  const userSelect = screen.getByLabelText("使用者");
+  expect(within(userSelect).getByRole("option", { name: "陳小華" })).toBeInTheDocument();
+  expect(within(userSelect).queryByRole("option", { name: "張大同" })).not.toBeInTheDocument();
+});
+
+test("管理員維持可切換的部門下拉與「全公司出勤」標題", async () => {
+  render(<CompanyAttendancePage />);
+
+  expect(await screen.findByText("全公司出勤")).toBeInTheDocument();
+  const departmentSelect = screen.getByLabelText("部門");
+  expect(within(departmentSelect).getByRole("option", { name: "全公司" })).toBeInTheDocument();
+  expect(within(departmentSelect).getByRole("option", { name: "業務部" })).toBeInTheDocument();
 });
 
 test("載入後帶出全公司出勤紀錄", async () => {

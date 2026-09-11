@@ -3,7 +3,13 @@
 from datetime import date, timedelta
 
 from app.utils.pg_types import pg_date
-from tests.helpers import EMPLOYEE_ID, OTHER_EMPLOYEE_ID, login_headers, taipei
+from tests.helpers import (
+    EMPLOYEE_ID,
+    MANAGER_ID,
+    OTHER_EMPLOYEE_ID,
+    login_headers,
+    taipei,
+)
 
 WEDNESDAY = date(2026, 8, 19)  # 正常
 THURSDAY = date(2026, 8, 20)   # 早退
@@ -115,12 +121,87 @@ async def test_date_range_filter_limits_results(client, db):
     assert dates == [THURSDAY.isoformat()]
 
 
-async def test_company_attendance_is_admin_only(client):
-    employee_headers = await login_headers(client, "employee@demo.com")
-    manager_headers = await login_headers(client, "manager@demo.com")
+async def test_company_attendance_rejects_employee(client):
+    headers = await login_headers(client, "employee@demo.com")
 
-    assert (await client.get("/api/attendance", headers=employee_headers)).status_code == 403
-    assert (await client.get("/api/attendance", headers=manager_headers)).status_code == 403
+    assert (await client.get("/api/attendance", headers=headers)).status_code == 403
+
+
+async def test_manager_sees_only_own_department(client, db):
+    # 員工 3 在部門 1（與主管同部門），員工 5 在部門 2。
+    await _insert_attendance(db, EMPLOYEE_ID, WEDNESDAY, taipei(2026, 8, 19, 9, 0))
+    await _insert_attendance(db, OTHER_EMPLOYEE_ID, WEDNESDAY, taipei(2026, 8, 19, 9, 0))
+    headers = await login_headers(client, "manager@demo.com")
+
+    response = await client.get(
+        "/api/attendance?start_date=2026-08-19&end_date=2026-08-19", headers=headers
+    )
+
+    assert response.status_code == 200
+    user_ids = {row["user_id"] for row in response.json()["records"]}
+    assert OTHER_EMPLOYEE_ID not in user_ids
+    assert user_ids <= {MANAGER_ID, EMPLOYEE_ID}
+
+
+async def test_manager_specifying_own_department_is_same_as_omitting(client, db):
+    await _insert_attendance(db, EMPLOYEE_ID, WEDNESDAY, taipei(2026, 8, 19, 9, 0))
+    headers = await login_headers(client, "manager@demo.com")
+    query = "start_date=2026-08-19&end_date=2026-08-19"
+
+    omitted = await client.get(f"/api/attendance?{query}", headers=headers)
+    specified = await client.get(f"/api/attendance?department_id=1&{query}", headers=headers)
+
+    assert omitted.json()["records"] == specified.json()["records"]
+
+
+async def test_manager_cannot_query_other_department(client):
+    headers = await login_headers(client, "manager@demo.com")
+
+    by_department = await client.get("/api/attendance?department_id=2", headers=headers)
+    by_user = await client.get(
+        f"/api/attendance?user_id={OTHER_EMPLOYEE_ID}", headers=headers
+    )
+
+    assert by_department.status_code == 403
+    assert by_user.status_code == 403
+
+
+async def test_manager_can_query_own_department_member(client, db):
+    await _insert_attendance(db, EMPLOYEE_ID, WEDNESDAY, taipei(2026, 8, 19, 9, 0))
+    headers = await login_headers(client, "manager@demo.com")
+
+    response = await client.get(
+        f"/api/attendance?user_id={EMPLOYEE_ID}&start_date=2026-08-19&end_date=2026-08-19",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert {row["user_id"] for row in response.json()["records"]} == {EMPLOYEE_ID}
+
+
+async def test_manager_without_department_is_denied(client, db):
+    """deny-by-default 的關鍵斷言：沒有部門可限縮時必須擋下，不得因此看到全公司。"""
+    await db.execute("UPDATE users SET department_id = NULL WHERE id = $1", MANAGER_ID)
+    headers = await login_headers(client, "manager@demo.com")
+
+    response = await client.get("/api/attendance", headers=headers)
+
+    assert response.status_code == 403
+
+
+async def test_attendance_and_changes_share_the_same_visible_scope(client, db):
+    """出勤明細與出勤異動必須解析出相同的可見成員集合（同一支 attendance_scope）。"""
+    await _insert_attendance(db, EMPLOYEE_ID, WEDNESDAY, taipei(2026, 8, 19, 9, 0))
+    await _insert_attendance(db, OTHER_EMPLOYEE_ID, WEDNESDAY, taipei(2026, 8, 19, 9, 0))
+    headers = await login_headers(client, "manager@demo.com")
+
+    records = await client.get("/api/attendance?department_id=2", headers=headers)
+    changes = await client.get(
+        "/api/attendance/changes?department_id=2&start_date=2026-08-19&end_date=2026-08-19",
+        headers=headers,
+    )
+
+    assert records.status_code == changes.status_code == 403
 
 
 async def test_company_attendance_can_filter_by_department(client, db):

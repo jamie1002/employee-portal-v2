@@ -53,7 +53,11 @@ async def get_changes(request: Request, current_user: dict = Depends(get_current
     return {"changes": changes}
 
 
+# admin 看全公司、manager 限所屬部門。範圍判斷集中在 service（與 /attendance/changes
+# 共用同一支 attendance_scope），所以這裡只掛角色、不做部門判斷。
 @router.get("/attendance")
-async def get_all(request: Request, current_user: dict = Depends(require_roles("admin"))):
+async def get_all(
+    request: Request, current_user: dict = Depends(require_roles("admin", "manager"))
+):
     parsed = parse_company_attendance_query(dict(request.query_params))
-    return {"records": await attendance_service.get_all(get_pool(), **parsed)}
+    return {"records": await attendance_service.get_all(get_pool(), current_user, **parsed)}

@@ -74,3 +74,32 @@ test("資料庫管理頁可切換資料表與檢視結構定義", async ({ page 
   await page.getByRole("button", { name: "結構定義" }).click();
   await expect(page.getByRole("cell", { name: "email" })).toBeVisible();
 });
+
+test("主管只看得到所屬部門的出勤，員工完全沒有這個入口", async ({ page }) => {
+  await loginAs(page, /部門主管 Manager/);
+
+  // 文案依角色切換：主管看到的不是全公司。
+  await expect(page.getByRole("link", { name: "部門出勤" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "全公司出勤" })).toHaveCount(0);
+
+  await page.getByRole("link", { name: "部門出勤" }).click();
+  await expect(page.getByRole("heading", { name: "部門出勤" })).toBeVisible();
+
+  // 部門欄位是唯讀標籤，不是可切換的下拉——主管不能改成別的部門。
+  await expect(page.getByLabel("部門")).toHaveText("研發部");
+
+  // 表格只出現同部門成員；業務部的張大同不得出現。
+  await expect(page.getByRole("cell", { name: "陳小華" }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "張大同" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "登出" }).click();
+  await loginAs(page, /一般員工 Employee/);
+
+  await expect(page.getByRole("link", { name: "部門出勤" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "全公司出勤" })).toHaveCount(0);
+
+  // 直接輸入網址也不渲染任何出勤內容（RoleGate 回 null）。
+  await page.goto("/admin/attendance");
+  await expect(page.getByRole("heading", { name: "部門出勤" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "全公司出勤" })).toHaveCount(0);
+});

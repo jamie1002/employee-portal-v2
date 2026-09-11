@@ -88,3 +88,14 @@ test("手機版可完整送出一筆補打卡申請", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/requests$/);
 });
+
+test("375px 寬度下主管的部門出勤頁不出現整頁水平捲軸", async ({ page }) => {
+  await loginAs(page, /部門主管 Manager/);
+
+  await openDrawer(page);
+  await clickNavLink(page, "部門出勤");
+  await expect(page.getByRole("heading", { name: "部門出勤" })).toBeVisible();
+  // 唯讀的部門標籤與其餘篩選欄位一樣是 w-full，手機斷點下各自佔滿整行。
+  await expect(page.getByLabel("部門")).toHaveText("研發部");
+  expect(await hasNoPageHorizontalScroll(page)).toBe(true);
+});

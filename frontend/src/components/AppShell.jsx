@@ -26,7 +26,14 @@ export const NAV_ITEMS = [
   { to: "/employees", label: "員工資訊", roles: ["admin", "manager", "employee"] },
   { to: "/departments", label: "部門管理", roles: ["admin"] },
   { to: "/holidays", label: "國定假日", roles: ["admin"], permissions: ["holidays.manage"] },
-  { to: "/admin/attendance", label: "全公司出勤", roles: ["admin"] },
+  // 主管看到的是所屬部門而非全公司，文案必須跟著換——「全公司出勤」對主管是錯誤描述，
+  // 而這行字是使用者判斷「我現在看到的資料涵蓋多少人」的唯一線索。
+  {
+    to: "/admin/attendance",
+    label: "全公司出勤",
+    labelByRole: { manager: "部門出勤" },
+    roles: ["admin", "manager"],
+  },
   { to: "/settings", label: "考勤設定", roles: ["admin"], permissions: ["settings.manage"] },
   { to: "/schema", label: "資料庫管理", roles: ["admin"] },
   { to: "/exports", label: "匯出報表", roles: ["admin", "manager"], permissions: ["exports.run"] },
@@ -79,7 +86,7 @@ export default function AppShell() {
                 }`
               }
             >
-              {item.label}
+              {item.labelByRole?.[user?.role] ?? item.label}
             </NavLink>
           ))}
         </nav>

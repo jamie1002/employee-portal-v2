@@ -163,7 +163,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 | 8 | `/admin/employees` | 員工資訊 | 全部（通訊錄用途） |
 | 9 | `/admin/departments` | 部門管理 | admin |
 | 10 | `/admin/holidays` | 國定假日 | admin **或持有 `holidays.manage`** |
-| 11 | `/admin/attendance` | 全公司出勤 | admin |
+| 11 | `/admin/attendance` | 全公司出勤（admin）／部門出勤（manager） | admin、manager |
 | 12 | `/admin/settings` | 系統設定 | admin **或持有 `settings.manage`** |
 | 13 | `/admin/schema` | 資料庫管理 | admin |
 | 14 | `/admin/exports` | 匯出報表 | admin, manager **或持有 `exports.run`** |
@@ -266,10 +266,21 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 
 說明文字（政府行事曆需每年手動維護）+ 新增表單（日期、名稱）+ 清單（依日期排序）。刪除直接執行（無二次確認）。
 
-### 3.14 `/admin/attendance` 全公司出勤（admin）
+### 3.14 `/admin/attendance` 全公司出勤（admin）／部門出勤（manager）
 
 篩選列（**部門 → 使用者 → 狀態 → 起訖日期**，順序固定）+ 出勤表格（多顯示姓名與部門欄）。
 **選擇部門後員工下拉必須連動**只列該部門成員；切換部門時若已選員工不屬於新部門則清空。
+
+**依角色的兩種形態**：
+
+| | admin | manager |
+| :--- | :--- | :--- |
+| 頁面標題與選單文案 | 全公司出勤 | 部門出勤 |
+| 部門欄位 | 可切換的下拉，含「全公司」選項 | **唯讀標籤**，顯示所屬部門名稱 |
+| 使用者下拉 | 依所選部門連動 | 只列所屬部門成員 |
+
+主管的部門欄位刻意保留為唯讀標籤而非直接隱藏：沒有這行字，主管會誤以為畫面上是全公司
+資料。這個鎖定純粹是 UX，真正的邊界在後端（`SPEC.md` §6 的 `/attendance`）。
 
 ### 3.15 `/admin/settings` 考勤設定（admin 或 `settings.manage`）
 

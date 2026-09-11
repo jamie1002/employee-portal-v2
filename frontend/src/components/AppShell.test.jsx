@@ -31,6 +31,26 @@ test("選單以 hasAccess 過濾，一般員工看得到共通項目", () => {
   expect(screen.getByRole("link", { name: "出勤紀錄" })).toBeInTheDocument();
 });
 
+test("出勤查詢入口：主管顯示「部門出勤」、管理員顯示「全公司出勤」、員工看不到", () => {
+  renderShell({ name: "王小明", role: "manager", department_id: 1, permissions: [] });
+
+  expect(screen.getByRole("link", { name: "部門出勤" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "全公司出勤" })).not.toBeInTheDocument();
+});
+
+test("管理員的出勤查詢入口文案維持「全公司出勤」", () => {
+  renderShell({ name: "系統管理者", role: "admin", permissions: [] });
+
+  expect(screen.getByRole("link", { name: "全公司出勤" })).toBeInTheDocument();
+});
+
+test("一般員工看不到出勤查詢入口", () => {
+  renderShell({ name: "陳小華", role: "employee", permissions: [] });
+
+  expect(screen.queryByRole("link", { name: "部門出勤" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "全公司出勤" })).not.toBeInTheDocument();
+});
+
 test("選單項目一律帶 roles 或 permissions，不得有無條件顯示的漏網項目", () => {
   for (const item of NAV_ITEMS) {
     expect(Boolean(item.roles?.length || item.permissions?.length)).toBe(true);

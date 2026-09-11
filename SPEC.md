@@ -52,7 +52,7 @@
 
 | 功能模組 | 員工 (employee) | 主管 (manager) | 系統管理者 (admin) |
 | :--- | :--- | :--- | :--- |
-| **上下班打卡** | 僅限本人打卡與紀錄檢視 | 僅限本人打卡與紀錄檢視 | 僅限本人打卡，可檢視全公司紀錄 |
+| **上下班打卡** | 僅限本人打卡與紀錄檢視 | 僅限本人打卡，可檢視**所屬部門**紀錄 | 僅限本人打卡，可檢視全公司紀錄 |
 | **補打卡** | 提出申請（同日禁止重複）、檢視個人進度 | 審核所屬部門同仁申請 | 審核全公司申請 |
 | **請假申請** | 提出申請、查看假況與假別剩餘量 | 審核所屬部門同仁請假 | 審核全體請假、維護國定假日（可下放） |
 | **加班申請** | 提出申請（30 分鐘為單位）、查看個人核可時數 | 審核所屬部門同仁加班 | 審核全體加班、匯出報表（可下放） |
@@ -458,8 +458,10 @@ UNIQUE `(user_id, punch_date)`；索引 `(user_id, punch_date DESC)`。
 | GET | `/attendance/today` | 登入 | |
 | POST | `/attendance/today/note` | 登入 | 無請求主體，伺服器端寫入固定文字「處理私人事務」 |
 | GET | `/attendance/me` | 登入 | query：`start_date`、`end_date`、`status`、`page`、`page_size`(1–100) |
-| GET | `/attendance` | admin | query：`user_id`、`department_id`、`start_date`、`end_date`、`status` |
+| GET | `/attendance` | admin、manager | query：`user_id`、`department_id`、`start_date`、`end_date`、`status`。範圍控管在 service：manager 限所屬部門，指定他部門或他部門成員回 403，未指派部門的 manager 一律 403 |
 | GET | `/attendance/changes` | 登入 | 範圍控管在 service：本人／manager 限同部門／admin 不限 |
+
+`/attendance` 與 `/attendance/changes` 的可見範圍**由同一支 `attendance_scope.resolve_visible_user_ids()` 解析**，不各自實作。這兩支端點與匯出（§4.8，非 admin 強制注入自己的 `department_id`）三者的主管範圍語意一致：主管看得到所屬部門，看不到其他部門。
 
 `status` 允許值：`normal`、`late`、`absent`、`holiday_work`、`on_leave`、`early_leave`、`missing_punch_out`。
 篩選 `normal` 時**必須同時排除**早退與未打下班卡的日子。

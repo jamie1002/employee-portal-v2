@@ -12,8 +12,7 @@ import asyncpg
 
 from app.config.settings import app_settings
 from app.repositories import attendance_repository, leave_request_repository, settings_repository
-from app.repositories import user_repository
-from app.services import attendance_effective
+from app.services import attendance_effective, attendance_scope
 from app.services.leave_hours import compute_leave_hours_for_date
 from app.services.work_hours import (
     LATE_PUNCH_OUT_MARGIN,
@@ -236,17 +235,25 @@ async def get_my_records(
 
 async def get_all(
     pool: asyncpg.Pool,
+    current_user: dict,
     user_id: int | None = None,
     department_id: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
     status: str | None = None,
 ) -> list[dict]:
-    if user_id:
-        user_ids = [user_id]
-    else:
-        members = await user_repository.find_all(pool, department_id=department_id)
-        user_ids = [member["id"] for member in members]
+    """依請求者的可見範圍回傳出勤明細。
+
+    範圍解析共用 `attendance_scope`，與出勤異動同一份實作。admin 不限、manager 限
+    自己的部門，其餘角色只看得到自己——即使 router 目前只放行 admin 與 manager，
+    這裡仍維持 deny-by-default，讓這支函式被其他呼叫端（例如 AI 助理的查詢工具）
+    重用時不會意外放行過多資料。
+    """
+    user_ids = await attendance_scope.resolve_visible_user_ids(
+        pool, current_user, user_id, department_id
+    )
+    if not user_ids:
+        return []
 
     all_records = await attendance_effective.resolve_range(
         pool, user_ids, start_date or EARLIEST_QUERY_DATE, end_date or LATEST_QUERY_DATE

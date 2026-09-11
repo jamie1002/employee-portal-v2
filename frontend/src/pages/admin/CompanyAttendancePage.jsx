@@ -5,6 +5,7 @@ import { getUsers } from "../../api/users.api";
 import AttendanceTable from "../../components/AttendanceTable";
 import DatePickerField from "../../components/DatePickerField";
 import RoleGate from "../../components/RoleGate";
+import { useAuth } from "../../context/AuthContext";
 import { useVirtualToday } from "../../hooks/useVirtualClock";
 
 // 狀態篩選比對的是生效值（見後端 attendance_effective.py），early_leave／
@@ -24,6 +25,10 @@ const inputClass =
   "w-full sm:w-auto rounded-lg border border-border-subtle bg-surface-900 px-3 py-2 text-sm text-text-primary focus:border-accent-500 focus:outline-none";
 
 function CompanyAttendanceContent() {
+  const { user } = useAuth();
+  // 主管的可見範圍固定是自己的部門，不提供切換。這裡的鎖定純粹是 UX，真正的邊界在後端
+  // （attendance_scope 會覆蓋或回 403），前端即使被竄改也擴不出範圍。
+  const isManager = user?.role === "manager";
   const [records, setRecords] = useState([]);
   const [departmentId, setDepartmentId] = useState("");
   const [userId, setUserId] = useState("");
@@ -44,9 +49,13 @@ function CompanyAttendanceContent() {
 
   // 選了部門就只列該部門員工，選「全公司」才列出全部人；切換部門時若已選
   // 員工不屬於新部門則清空，避免篩選條件互相矛盾（見 docs/UI-SPEC.md §3.14）。
-  const employeeOptions = departmentId
-    ? users.filter((u) => String(u.department_id) === String(departmentId))
+  // 主管沒有部門下拉，可選範圍一律鎖在自己的部門。
+  const scopedDepartmentId = isManager ? user?.department_id : departmentId;
+  const employeeOptions = scopedDepartmentId
+    ? users.filter((u) => String(u.department_id) === String(scopedDepartmentId))
     : users;
+  const ownDepartmentName =
+    departments.find((d) => String(d.id) === String(user?.department_id))?.name ?? "所屬部門";
 
   function handleDepartmentChange(nextDepartmentId) {
     setDepartmentId(nextDepartmentId);
@@ -79,26 +88,42 @@ function CompanyAttendanceContent() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-medium text-text-primary">全公司出勤</h2>
+      <h2 className="text-xl font-medium text-text-primary">
+        {isManager ? "部門出勤" : "全公司出勤"}
+      </h2>
 
       <div className="glass-panel flex flex-wrap items-end gap-4 rounded-xl p-4">
         <div className="w-full sm:w-auto">
           <label htmlFor="company-attendance-department" className="mb-1 block text-xs text-text-muted">
             部門
           </label>
-          <select
-            id="company-attendance-department"
-            value={departmentId}
-            onChange={(event) => handleDepartmentChange(event.target.value)}
-            className={inputClass}
-          >
-            <option value="">全公司</option>
-            {departments.map((department) => (
-              <option key={department.id} value={department.id}>
-                {department.name}
-              </option>
-            ))}
-          </select>
+          {isManager ? (
+            // 唯讀標籤而非直接隱藏：主管必須看得出「這頁的資料只涵蓋我的部門」，
+            // 沒有這行字他會誤以為自己看到的是全公司（見 design.md Decision 4）。
+            // 用 <output> 而不是 <p>：它是 HTML 規範裡可被 <label for> 關聯的唯讀
+            // 顯示元素，換成 <p> 會讓上面那個 label 失去關聯，螢幕閱讀器與
+            // getByLabel 都找不到它。
+            <output
+              id="company-attendance-department"
+              className="block rounded-lg border border-border-subtle bg-surface-800 px-3 py-2 text-sm text-text-secondary"
+            >
+              {ownDepartmentName}
+            </output>
+          ) : (
+            <select
+              id="company-attendance-department"
+              value={departmentId}
+              onChange={(event) => handleDepartmentChange(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">全公司</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="w-full sm:w-auto">
           <label htmlFor="company-attendance-user" className="mb-1 block text-xs text-text-muted">
@@ -168,7 +193,7 @@ function CompanyAttendanceContent() {
 
 export default function CompanyAttendancePage() {
   return (
-    <RoleGate roles={["admin"]}>
+    <RoleGate roles={["admin", "manager"]}>
       <CompanyAttendanceContent />
     </RoleGate>
   );
