@@ -119,3 +119,38 @@ def test_today_is_rendered_with_weekday():
 
     assert "2026-09-11" in prompt
     assert "星期五" in prompt
+
+
+# ── 拒答判定的寬鬆度與誤判防線 ──────────────────────────────────────────────
+
+def test_refusal_detection_tolerates_filler_words():
+    """語氣改自然之後，模型會在「文件」與「沒有」之間插入修飾語。固定字串比對
+    會把這種標準的正確拒答判成「該拒答卻回答了」（實測 eval 因此假紅一題）。
+
+    下面四句是**同一題誘導題在四輪 eval 中實際產生的回答**——模型每次都正確拒答，
+    措辭卻每次不同。這就是為什麼拒答偵測不能只認一種寫法。
+    """
+    assert chat_prompt.is_refusal("關於今年的員工旅遊，公司文件裡目前沒有寫到具體的地點喔。")
+    assert chat_prompt.is_refusal("這部分公司文件裡沒有寫到。")
+    assert chat_prompt.is_refusal("文件中沒有提到這個主題。")
+    assert chat_prompt.is_refusal("公司文件並未提到相關規定。")
+    assert chat_prompt.is_refusal(
+        "關於員工旅遊的資訊，目前公司文件裡只有提到補助比例的規定，"
+        "並沒有寫到今年要去哪裡玩，或是具體的活動日期。"
+    )
+
+
+def test_refusal_detection_keeps_corpus_authored_phrasings():
+    """語料自己寫的拒答措辭（product-catalog.md §4／§5）必須照樣認得。"""
+    assert chat_prompt.is_refusal("本文件不包含庫存資料。")
+    assert chat_prompt.is_refusal("這個問題不在本文件範圍。")
+    assert chat_prompt.is_refusal("查無相關規定。")
+
+
+def test_refusal_detection_does_not_flag_normal_answers():
+    """誤判成拒答比漏判更糟：拒答率會虛高，引用率的分母還會跟著縮水。
+    特別是「規定沒有上限」這種句子，開頭詞刻意不收「規定」就是為了擋這個。"""
+    assert not chat_prompt.is_refusal("公假的規定沒有上限，依實際需要核給。")
+    assert not chat_prompt.is_refusal("加班時數以 30 分鐘為單位無條件捨去。")
+    assert not chat_prompt.is_refusal("你八月遲到 3 次。")
+    assert not chat_prompt.is_refusal("依照文件的說明，滿 10 年有 16 天特休。")

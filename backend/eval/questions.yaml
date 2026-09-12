@@ -404,7 +404,11 @@ questions:
       kwargs: {start: "2026-08-24T13:00:00", end: "2026-08-24T18:00:00"}
       unit: "小時"
       in_corpus: true
-      expect_stated: required
+      # 這題問的是「該怎麼申請」與「會不會被判早退」，**沒有問時數**。上面三條
+      # expected_points 也完全沒提到 5 小時——required 與這題自己的驗收條件互相
+      # 矛盾，是題目定義寫錯了。語料一致性檢查（in_corpus）照舊，只放寬「回答
+      # 一定要講出這個數字」這項。
+      expect_stated: optional
 
   - question: "半天的特別休假需要填寫事由嗎？"
     category: policy

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 # 判斷「這則回答是不是拒答」用的字串。第二版把措辭改自然之後，marker 也跟著放寬：
@@ -26,13 +27,28 @@ from datetime import date
 _REFUSAL_MARKERS = (
     "查無相關規定",
     "沒有相關規定",
-    "文件裡沒有",
-    "文件中沒有",
-    "文件沒有提到",
-    "沒有提到這",
     "本文件不包含",
     "本文件不含",
     "不在本文件範圍",
+    # 「缺少資訊」的口語說法。同一題誘導題連續三輪都正確拒答，措辭卻三次都不同
+    # （「文件裡目前沒有寫到」「並沒有寫到」「文件裡沒有寫到」），共同核心就是這幾個詞。
+    # 與其把下面那條正則愈追愈長，不如直接認這些動詞片語——它們在這個領域裡幾乎只會
+    # 出現在「某項資訊不存在」的句子中。
+    "沒有寫到",
+    "沒有提到",
+    "未提到",
+    "並未寫",
+)
+
+# **固定字串比對不夠用**：措辭改自然之後，模型會在「文件」與「沒有」之間插入修飾語，
+# 例如「公司文件裡**目前**沒有寫到」——這是標準的正確拒答，卻比對不到「文件裡沒有」
+# 這個連續字串，於是被判成「該拒答卻回答了」。這跟數字單位同義詞是同一類假紅。
+#
+# 開頭刻意只收「文件／語料」，**不收「規定／規範」**：「公假的規定沒有上限」這種句子
+# 是正常回答，收進來會反過來把它誤判成拒答，比漏判更糟（拒答率虛高、引用率的分母
+# 還會跟著縮水）。中間允許的字數也刻意壓在 8 字以內，避免跨越整個句子亂配。
+_REFUSAL_PATTERN = re.compile(
+    r"(文件|語料)[^。！？\n]{0,8}(沒有|沒寫|未提|未寫|查無|不包含|不含)"
 )
 
 SYSTEM_PROMPT = """你是「暖丘生活股份有限公司」員工系統的政策問答助理。
@@ -129,8 +145,7 @@ TOOL_RULES = """
   **不要憑文件片段推測，也不要編造數字**。
 - 需要日期但使用者沒說清楚時，用下面提供的「今天」去推算他的意思
   （「這個月」「上個月」「這週」都以今天為基準）。真的無法判斷才反問他。
-- 問題與個人資料無關時（例如純粹問公司規定），不要呼叫任何工具，直接依文件片段回答。
-- 上面規則 1 到 6 全部仍然有效，特別是規則 2 的推算但書。"""
+- 問題與個人資料無關時（例如純粹問公司規定），不要呼叫任何工具，直接依文件片段回答。"""
 
 # 只在**模型真的呼叫了工具之後**才附加的規則。
 #
@@ -155,6 +170,16 @@ _TODAY_PROMPT = """
 
 今天是 {today}（{weekday}）。使用者提到「今天」「這個月」「上個月」「這週」時，
 一律以這個日期為基準推算，不要用你自己認知的日期。"""
+
+# **刻意放在整份提示詞的最後一行。** 昨天的退化教訓是「位置比措辭大聲」：夾在中間的
+# 規則會被後面的內容蓋過。規則 2 的推算但書是 eval 六項門檻之一，加上規則 7 與日期
+# 說明之後，它離結尾又遠了一截，實測「下午 14:00 請假到 18:00」這種前提明確的推算題
+# 連續三輪都漏掉但書。把它放在最後一句，是用同一個機制把它搶回來。
+_DISCLAIMER_REMINDER = """
+
+最後提醒：以上規則 1 到 7 全部同時有效。**只要答案裡的數字是你依文件規則推算出來的
+（不是原文照抄、也不是工具查回來的），結尾就必須加上「實際仍以系統顯示為準」這類提醒**
+——即使你覺得前提很明確、即使你在句子裡已經提到「系統」兩個字，這句提醒仍然不能省略。"""
 
 _HUMAN_PROMPT = """系統目前生效的考勤設定（即時值，**與文件片段裡的預設值不一致時
 一律以這裡為準**）：
@@ -226,7 +251,9 @@ def build_user_content(results: list, question: str, settings: dict | None = Non
 
 def is_refusal(text: str) -> bool:
     """判斷一段回答是不是拒答（含語料自己寫的拒答措辭，見 `_REFUSAL_MARKERS` 說明）。"""
-    return any(marker in text for marker in _REFUSAL_MARKERS)
+    if any(marker in text for marker in _REFUSAL_MARKERS):
+        return True
+    return _REFUSAL_PATTERN.search(text) is not None
 
 
 _WEEKDAYS = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
@@ -248,4 +275,8 @@ def build_system_prompt(today: date | None, *, with_tool_results: bool = False) 
     prompt = SYSTEM_PROMPT + TOOL_RULES + _TODAY_PROMPT.format(
         today=today.isoformat(), weekday=_WEEKDAYS[today.weekday()]
     )
-    return prompt + TOOL_RESULT_RULES if with_tool_results else prompt
+    # 第二輪帶工具結果時，那段「工具數字不加但書」必須是最後一句（它要壓過推算但書的
+    # 提醒，而這一輪的數字確實來自工具）；第一輪則反過來，由推算但書收尾。
+    if with_tool_results:
+        return prompt + _DISCLAIMER_REMINDER + TOOL_RESULT_RULES
+    return prompt + _DISCLAIMER_REMINDER

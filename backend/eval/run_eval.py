@@ -355,7 +355,14 @@ async def run_eval(
                     # 推算出來的答案必須附上但書。推算的前提（當天班表、請假狀況、
                     # 是哪一週）可能與使用者的實際情形不同，沒有這句提醒，使用者會
                     # 把推算結果當成系統的正式判定。
-                    if not number_spec.get("in_corpus"):
+                    #
+                    # **但前提是回答真的講出了推算結果。** 系統提示規則 2 的原文是
+                    # 「只要答案是你推算出來的（不是原文照抄的數字）」——沒講出任何
+                    # 推算數字時，就沒有東西需要標註。`expect_stated: optional` 的題目
+                    # （前提不明確，例如不知道是哪一週）模型合理地選擇只解釋規則、
+                    # 不給數字，這是規則 3 期望的行為，不該因此被判失敗。
+                    # 留 None 代表「這題不納入但書分母」。
+                    if not number_spec.get("in_corpus") and stated:
                         result.answer_has_disclaimer = any(
                             marker in generated_text for marker in _DISCLAIMER_MARKERS
                         )
