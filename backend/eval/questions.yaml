@@ -711,3 +711,78 @@ questions:
       unit: "小時"
       in_corpus: false
       expect_stated: required
+
+  # ── 推算題補強（2026-09-12）─────────────────────────────────────────────
+  # 「推算但書」這一項原本分母只有 6 題，掉一題就是 17%，用 100% 當門檻去量一個
+  # 實測約 88% 的隨機行為本來就不可能穩定達標。下面五題把分母拉到十題以上，
+  # 讓這個比率有統計意義——門檻放寬（見 run_eval.py 的 DISCLAIMER_THRESHOLD）的
+  # 前提是分母要夠大，否則放寬只是把問題藏起來。
+  # 五題都刻意選「語料沒有寫死這個數字、必須套規則算出來」的情境。
+
+  - question: "我上午 10:00 請假到下午 15:00，會被認列幾小時？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 3. 請假時數試算規則"
+    expected_points:
+      - "推算出 4 小時：10:00–12:00 兩小時加上 13:00–15:00 兩小時"
+      - "午休 12:00–13:00 固定不計入，且請假試算的午休不浮動"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_leave_hours
+      kwargs: {start: "2026-08-24T10:00:00", end: "2026-08-24T15:00:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "我從週一請假到週三，總共會算幾小時？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 3. 請假時數試算規則"
+    expected_points:
+      - "推算出 24 小時：三個完整工作日，每日 8 小時"
+      - "逐工作日計算後加總，中間的完整工作日用表定 09:00–18:00"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_leave_hours
+      kwargs: {start: "2026-08-24T09:00:00", end: "2026-08-26T18:00:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "我加班從 18:30 做到 21:10，可以認列幾小時？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.1 時數計算"
+    expected_points:
+      - "推算出 2.5 小時：2 小時 40 分以 30 分鐘為單位無條件捨去"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_overtime_hours
+      kwargs: {start: "2026-08-24T18:30:00", end: "2026-08-24T21:10:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "加班從 18:30 到 20:00，認列幾小時？"
+    category: policy
+    expected_section_path: "出勤與申請作業規則 > 4. 加班申請 > 4.1 時數計算"
+    expected_points:
+      - "推算出 1.5 小時：剛好整除 30 分鐘單位，不需捨去"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: calculate_overtime_hours
+      kwargs: {start: "2026-08-24T18:30:00", end: "2026-08-24T20:00:00"}
+      unit: "小時"
+      in_corpus: false
+      expect_stated: required
+
+  - question: "到職滿 25 年，特別休假是幾天？"
+    category: policy
+    expected_section_path: "請假辦法及福利制度 > 2. 假別與額度 > 2.1 特別休假級距（依《勞動基準法》第 38 條）"
+    expected_points:
+      - "答 30 日：滿 24 年即達上限，25 年仍維持 30 日"
+      - "語料只寫到「滿 24 年達到 30 日上限」，25 年這個值要套上限規則推算"
+      - "推算出來的答案要提醒以系統實際顯示為準"
+    expected_number:
+      function: special_leave_days
+      kwargs: {total_months: 300}
+      unit: "日"
+      in_corpus: false
+      expect_stated: required
