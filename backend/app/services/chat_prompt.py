@@ -147,6 +147,26 @@ TOOL_RULES = """
   （「這個月」「上個月」「這週」都以今天為基準）。真的無法判斷才反問他。
 - 問題與個人資料無關時（例如純粹問公司規定），不要呼叫任何工具，直接依文件片段回答。"""
 
+# 以下兩段**二選一**，由後端依角色決定要接哪一段——不是讓模型自己判斷「我手上有沒有
+# 這支工具」。
+#
+# 第一版把兩種情況寫成一條帶條件的規則（「問到別人的資料而你沒有對應工具時，就說沒有
+# 權限」），實測主管問「我部門這個月誰遲到最多」時，模型**根本沒有呼叫它明明擁有的
+# 工具**就直接回「你沒有權限」——lite 模型做不到「檢查自己的工具清單再決定」這種
+# 自我反省，它只抓到了「部門出勤 → 沒有權限」這個關聯。
+#
+# 後端本來就知道自己發了哪些工具出去，把這個判斷留在程式裡，模型就不必猜。
+_TEAM_TOOL_RULES = """
+- 使用者問到所屬部門（管理員則含全公司或指定部門）的出勤狀況時，
+  **呼叫 get_team_attendance_summary**，不要憑文件推測，也不要說你沒有權限——你有。
+- 要查特定同事時，把姓名填進 employee_name，不要用任何編號。"""
+
+_NO_TEAM_TOOL_RULES = """
+- **使用者問到「別人的」或「整個部門／全公司的」出勤資料時，那代表他的權限看不到這些
+  資料，不是文件裡沒有寫。** 要說「這部分你目前沒有權限查看」，並建議他問主管或人資。
+  **不要說成「文件裡沒有」，更不要說系統沒有這個功能**——系統有，只是他看不到，
+  講錯會讓他以為是產品缺陷而不是權限設定。"""
+
 # 只在**模型真的呼叫了工具之後**才附加的規則。
 #
 # **這個「只在第二輪出現」是結構性的，不是寫法偏好。** 第一版把「工具數字不要加但書」
@@ -259,7 +279,9 @@ def is_refusal(text: str) -> bool:
 _WEEKDAYS = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
 
 
-def build_system_prompt(today: date | None, *, with_tool_results: bool = False) -> str:
+def build_system_prompt(
+    today: date | None, *, has_team_tools: bool = False, with_tool_results: bool = False
+) -> str:
     """組出批 B 的系統提示：既有規則 + 工具規則 + 今天是哪一天。
 
     `today` 必須來自虛擬時鐘。傳 `None` 時退回批 A 的提示（不帶工具規則）——
@@ -272,7 +294,9 @@ def build_system_prompt(today: date | None, *, with_tool_results: bool = False) 
     """
     if today is None:
         return SYSTEM_PROMPT
-    prompt = SYSTEM_PROMPT + TOOL_RULES + _TODAY_PROMPT.format(
+    # 團隊查詢的規則二選一，依後端實際發出去的工具清單決定（見 _TEAM_TOOL_RULES 說明）。
+    team_rules = _TEAM_TOOL_RULES if has_team_tools else _NO_TEAM_TOOL_RULES
+    prompt = SYSTEM_PROMPT + TOOL_RULES + team_rules + _TODAY_PROMPT.format(
         today=today.isoformat(), weekday=_WEEKDAYS[today.weekday()]
     )
     # 第二輪帶工具結果時，那段「工具數字不加但書」必須是最後一句（它要壓過推算但書的

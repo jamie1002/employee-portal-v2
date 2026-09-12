@@ -154,3 +154,26 @@ def test_refusal_detection_does_not_flag_normal_answers():
     assert not chat_prompt.is_refusal("加班時數以 30 分鐘為單位無條件捨去。")
     assert not chat_prompt.is_refusal("你八月遲到 3 次。")
     assert not chat_prompt.is_refusal("依照文件的說明，滿 10 年有 16 天特休。")
+
+
+def test_team_rules_are_selected_by_backend_not_by_the_model():
+    """**這條守的是一次實測出來的 bug**：第一版把兩種情況寫成一條帶條件的規則
+    （「問到別人的資料而你沒有對應工具時，就說沒有權限」），主管問「我部門這個月
+    誰遲到最多」時，模型根本沒呼叫它明明擁有的工具就直接回「你沒有權限」。
+
+    lite 模型做不到「先檢查自己的工具清單再決定」。後端本來就知道發了哪些工具出去，
+    這個判斷要留在程式裡。
+    """
+    from datetime import date
+
+    today = date(2026, 9, 12)
+    with_team = chat_prompt.build_system_prompt(today, has_team_tools=True)
+    without_team = chat_prompt.build_system_prompt(today, has_team_tools=False)
+
+    # 有團隊工具的角色：要被叫去呼叫工具，且不能被暗示自己沒有權限
+    assert "get_team_attendance_summary" in with_team
+    assert "沒有權限查看" not in with_team
+
+    # 沒有團隊工具的角色：要用「沒有權限」解釋，而不是說文件沒寫或系統沒這功能
+    assert "沒有權限查看" in without_team
+    assert "get_team_attendance_summary" not in without_team

@@ -120,8 +120,16 @@ async def answer_with_tools(
     正式環境帶工具之後有沒有退化——而那正是這一批唯一的硬性驗收條件。
     """
     today = get_business_date(await get_virtual_now(), tz=app_settings.APP_TIMEZONE)
-    system_prompt = chat_prompt.build_system_prompt(today)
     tools = chat_tools.build_declarations(current_user)
+    # 提示詞裡「能不能查團隊資料」這件事，直接讀**實際發出去的工具清單**，不另外用角色
+    # 判斷一次——兩處各自判斷遲早會分歧，而分歧的後果是模型收到一份與它手上工具不符的
+    # 說明（實測會讓主管被告知「你沒有權限」，即使他明明有那支工具）。
+    has_team_tools = any(
+        declaration.name == "get_team_attendance_summary"
+        for tool in tools
+        for declaration in tool.function_declarations
+    )
+    system_prompt = chat_prompt.build_system_prompt(today, has_team_tools=has_team_tools)
 
     turn = await client.generate_with_tools(system_prompt, user_content, tools)
     if not turn.calls:
@@ -142,7 +150,12 @@ async def answer_with_tools(
     # 第二輪才附加「工具數字不加但書」那段規則。放在第一輪會讓政策問答的推算但書
     # 整片消失（77 題 eval 實測從 7/7 掉到 1/7），見 chat_prompt.TOOL_RESULT_RULES。
     text = await client.continue_with_tool_results(
-        chat_prompt.build_system_prompt(today, with_tool_results=True), tools, turn, results
+        chat_prompt.build_system_prompt(
+            today, has_team_tools=has_team_tools, with_tool_results=True
+        ),
+        tools,
+        turn,
+        results,
     )
     return text, [call.name for call in calls]
 
