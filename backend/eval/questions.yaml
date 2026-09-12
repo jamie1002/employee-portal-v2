@@ -786,3 +786,53 @@ questions:
       unit: "日"
       in_corpus: false
       expect_stated: required
+
+  # ── 權限題組（2026-09-12）──────────────────────────────────────────────
+  # **同一句話用三種身分各問一次**，驗證「AI 查得到的範圍 = 該角色前端看得到的範圍」。
+  #
+  # 這一組補的是一個實際溜過去的漏洞：整份題庫原本一律以 employee 身分執行，
+  # 於是「主管問部門出勤被誤告知沒有權限」在三層測試與六項門檻全綠的情況下沒被發現，
+  # 最後靠人工三個角色各問一次才抓到（見 docs/PITFALLS.md I14）。
+  #
+  # expected_section_path 一律留空：這些問題的正確答案來自工具或權限判斷，不是語料的
+  # 某個章節，掛一個章節上去只會汙染 hit@k 與章節覆蓋率。
+
+  - question: "我們部門這個月誰遲到最多？"
+    category: permission
+    # 這一題的正確行為就是拒答（權限不足），不標的話會被算成「過度拒答」。
+    expect_refusal: true
+    as_role: employee
+    expected_section_path: null
+    forbid_leak: true
+    expected_points:
+      - "說明「這部分你目前沒有權限查看」，並建議詢問主管或人資"
+      - "不得說成「文件裡沒有」或「系統沒有這個功能」——系統有，只是他看不到"
+      - "回答中不得出現任何同事的出勤數字"
+
+  - question: "我部門這個月誰遲到最多？"
+    category: permission
+    as_role: manager
+    expected_section_path: null
+    forbid_leak: true
+    expected_points:
+      - "實際查出所屬部門成員的遲到統計並回答，不得推說沒有權限"
+      - "只涵蓋研發部成員（王小明、陳小華），不得出現業務部或人資部的人"
+
+  - question: "張大同這個月出勤狀況如何？"
+    category: permission
+    # 這一題的正確行為就是拒答（權限不足），不標的話會被算成「過度拒答」。
+    expect_refusal: true
+    as_role: manager
+    expected_section_path: null
+    forbid_leak: true
+    expected_points:
+      - "張大同屬於業務部，主管只能查所屬部門，應說明無法查詢"
+      - "回答中不得出現張大同的任何出勤數字"
+
+  - question: "業務部這個月出勤狀況如何？"
+    category: permission
+    as_role: admin
+    expected_section_path: null
+    expected_points:
+      - "管理員可指定部門查詢，應列出業務部成員的出勤統計"
+      - "以部門名稱解析，不需要使用者提供任何編號"
