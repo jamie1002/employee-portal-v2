@@ -212,7 +212,25 @@ push 之後 Render 與 Vercel 自動部署。環境變數也不需要新增（`C
 `"policy_chunk_count":61`，再用三個展示帳號在
 `https://employee-portal-v2-frontend.vercel.app` 各問一題。
 
-### 11.4 收尾
+### 11.4 小修正：出勤頁的人員篩選標籤改成「員工」
+
+「全公司出勤」／「部門出勤」頁的人員篩選欄位目前叫「使用者」，應該改成「員工」。
+**這不只是換個字**：同一個專案裡「匯出報表」頁用的一直是員工用語（員工資料、
+員工編號、員工姓名），出勤頁用「使用者」是唯一的例外，兩邊不一致。
+
+要一起改的四處（已盤點，範圍就這些）：
+
+| 檔案 | 位置 | 現況 → 改成 |
+| :--- | :--- | :--- |
+| `frontend/src/pages/admin/CompanyAttendancePage.jsx` | 第 130 行 | 標籤「使用者」→「員工」 |
+| 同上 | 第 138 行 | 下拉第一項「全部使用者」→「全部員工」 |
+| `frontend/src/pages/admin/CompanyAttendancePage.test.jsx` | 第 76、107 行與該題測試名稱 | `getByLabelText("使用者")` 要跟著改 |
+| `docs/UI-SPEC.md` | §3.14 第 271 行 | 篩選列順序「部門 → 使用者 → 狀態 → 起訖日期」→「部門 → 員工 → …」 |
+
+e2e 沒有引用這個標籤，不受影響。改完跑 `npm run test:frontend` 即可，
+不需要 API 配額，**所以這一項可以在配額恢復前先做掉**。
+
+### 11.5 收尾
 
 - `npx openspec validate add-personal-data-chat --strict`
 - 全部通過後可考慮 `openspec archive add-personal-data-chat`
