@@ -1,15 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { askChat } from "../api/chat.api";
 import ChatMessage from "../components/ChatMessage";
+import { useAuth } from "../context/AuthContext";
 
-// 取自黃金題庫的代表題，涵蓋四份語料的主題，只是空狀態的提示按鈕，
-// 不是精確題庫比對，實際答案一律由 AI 助理即時檢索回答。
-const SUGGESTED_QUESTIONS = [
+// 空狀態的提示按鈕（不是精確題庫比對，實際答案一律由 AI 助理即時回答）。
+// 政策題取自黃金題庫的代表題，個人題則示範批 B 的查詢工具。
+const POLICY_QUESTIONS = [
   "「應到班時間」跟「表定上班時間」有什麼不一樣？",
   "特別休假的天數怎麼計算？",
-  "加班費用怎麼申請？",
-  "公司的產品有哪些保固方案？",
 ];
+
+const PERSONAL_QUESTIONS = [
+  "我今天打卡了嗎？",
+  "我特休還剩幾天？",
+];
+
+// 主管與管理員才問得到的範圍。**建議問題依角色切換不只是貼心**：列出一個他沒有
+// 權限問的問題，使用者點下去只會得到一句「這部分你沒有權限查看」，那是自找的挫折。
+const TEAM_QUESTIONS = {
+  manager: ["我部門這個月誰遲到最多？", "有哪些單子在等我審核？"],
+  admin: ["這個月全公司誰缺勤最多？", "有哪些單子在等我審核？"],
+};
+
+function suggestedQuestionsFor(role) {
+  return [...PERSONAL_QUESTIONS, ...(TEAM_QUESTIONS[role] ?? []), ...POLICY_QUESTIONS].slice(0, 4);
+}
 
 function errorMessageFor(err) {
   const code = err.response?.data?.error?.code;
@@ -29,6 +44,7 @@ function nextMessageId() {
 }
 
 export default function ChatPage() {
+  const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -93,7 +109,7 @@ export default function ChatPage() {
       <div>
         <h2 className="text-xl font-medium text-text-primary">AI 助理</h2>
         <p className="mt-1 text-xs text-text-muted">
-          回答僅依據公司政策文件。個人出勤紀錄、假別剩餘量與申請進度請至對應功能頁查詢。
+          可以問公司政策，也可以問你自己的出勤、假別與申請進度。查得到的範圍與你在系統裡看得到的一樣。
         </p>
       </div>
 
@@ -108,7 +124,7 @@ export default function ChatPage() {
           <div className="space-y-3">
             <p className="text-sm text-text-secondary">試著問看看：</p>
             <div className="flex flex-wrap gap-2">
-              {SUGGESTED_QUESTIONS.map((question) => (
+              {suggestedQuestionsFor(user?.role).map((question) => (
                 <button
                   key={question}
                   type="button"

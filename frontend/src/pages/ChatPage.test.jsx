@@ -7,7 +7,13 @@ vi.mock("../api/chat.api", () => ({
   askChat: (...args) => mockAskChat(...args),
 }));
 
+let mockUser = { id: 3, name: "陳小華", role: "employee", permissions: [] };
+vi.mock("../context/AuthContext", () => ({
+  useAuth: () => ({ user: mockUser }),
+}));
+
 beforeEach(() => {
+  mockUser = { id: 3, name: "陳小華", role: "employee", permissions: [] };
   mockAskChat.mockReset();
 });
 
@@ -108,4 +114,48 @@ test("Enter 送出、Shift+Enter 換行不送出", () => {
 
   fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
   expect(mockAskChat).toHaveBeenCalledWith("問題內容");
+});
+
+
+// ── 批 B：免責文案與依角色的建議問題 ────────────────────────────────────────
+
+test("不再顯示「請至對應功能頁查詢」的免責文案（批 A 埋的伏筆已拆除）", () => {
+  render(<ChatPage />);
+
+  expect(screen.queryByText(/請至對應功能頁查詢/)).not.toBeInTheDocument();
+});
+
+test("一般員工的建議問題只含個人與政策題，不含團隊題", () => {
+  render(<ChatPage />);
+
+  expect(screen.getByRole("button", { name: "我今天打卡了嗎？" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /誰遲到最多/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /等我審核/ })).not.toBeInTheDocument();
+});
+
+test("主管的建議問題含部門範圍的題目", () => {
+  mockUser = { id: 2, name: "王小明", role: "manager", department_id: 1, permissions: [] };
+  render(<ChatPage />);
+
+  expect(screen.getByRole("button", { name: "我部門這個月誰遲到最多？" })).toBeInTheDocument();
+});
+
+test("管理員的建議問題含全公司範圍的題目", () => {
+  mockUser = { id: 1, name: "系統管理者", role: "admin", permissions: [] };
+  render(<ChatPage />);
+
+  expect(screen.getByRole("button", { name: "這個月全公司誰缺勤最多？" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /我部門這個月/ })).not.toBeInTheDocument();
+});
+
+test("kind 為 personal 的回答正常渲染", async () => {
+  mockAskChat.mockResolvedValue({
+    answer: { kind: "personal", text: "你今天還沒打卡喔。", refused: false, sources: [] },
+  });
+  render(<ChatPage />);
+
+  fireEvent.change(getTextarea(), { target: { value: "我今天打卡了嗎" } });
+  fireEvent.click(screen.getByRole("button", { name: "送出" }));
+
+  expect(await screen.findByText("你今天還沒打卡喔。")).toBeInTheDocument();
 });
