@@ -73,7 +73,7 @@ test("主管的員工下拉只列出同部門成員", async () => {
 
   await waitFor(() => expect(screen.getByLabelText("部門")).toHaveTextContent("研發部"));
 
-  const userSelect = screen.getByLabelText("使用者");
+  const userSelect = screen.getByLabelText("員工");
   expect(within(userSelect).getByRole("option", { name: "陳小華" })).toBeInTheDocument();
   expect(within(userSelect).queryByRole("option", { name: "張大同" })).not.toBeInTheDocument();
 });
@@ -104,20 +104,20 @@ test("載入後帶出全公司出勤紀錄", async () => {
   expect(screen.getAllByText("王小明").length).toBeGreaterThan(0);
 });
 
-test("選擇部門後使用者下拉只列該部門成員，切換部門時清空不屬於新部門的已選使用者", async () => {
+test("選擇部門後員工下拉只列該部門成員，切換部門時清空不屬於新部門的已選員工", async () => {
   render(<CompanyAttendancePage />);
   await waitFor(() => expect(mockGetUsers).toHaveBeenCalled());
 
-  fireEvent.change(screen.getByLabelText("使用者"), { target: { value: "3" } }); // 陳小華（研發部）
+  fireEvent.change(screen.getByLabelText("員工"), { target: { value: "3" } }); // 陳小華（研發部）
   fireEvent.change(screen.getByLabelText("部門"), { target: { value: "1" } }); // 研發部：陳小華仍屬於，保留
 
-  expect(screen.getByLabelText("使用者")).toHaveValue("3");
+  expect(screen.getByLabelText("員工")).toHaveValue("3");
 
   fireEvent.change(screen.getByLabelText("部門"), { target: { value: "2" } }); // 業務部：陳小華不屬於，清空
-  expect(screen.getByLabelText("使用者")).toHaveValue("");
+  expect(screen.getByLabelText("員工")).toHaveValue("");
 
-  const options = within(screen.getByLabelText("使用者")).getAllByRole("option");
-  expect(options.map((o) => o.textContent)).toEqual(["全部使用者", "張大同"]);
+  const options = within(screen.getByLabelText("員工")).getAllByRole("option");
+  expect(options.map((o) => o.textContent)).toEqual(["全部員工", "張大同"]);
 });
 
 test("篩選條件變動會帶對應參數重新查詢", async () => {

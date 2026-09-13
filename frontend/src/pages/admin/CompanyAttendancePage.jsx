@@ -127,7 +127,7 @@ function CompanyAttendanceContent() {
         </div>
         <div className="w-full sm:w-auto">
           <label htmlFor="company-attendance-user" className="mb-1 block text-xs text-text-muted">
-            使用者
+            員工
           </label>
           <select
             id="company-attendance-user"
@@ -135,7 +135,7 @@ function CompanyAttendanceContent() {
             onChange={(event) => setUserId(event.target.value)}
             className={inputClass}
           >
-            <option value="">全部使用者</option>
+            <option value="">全部員工</option>
             {employeeOptions.map((user) => (
               <option key={user.id} value={user.id}>
                 {user.name}
