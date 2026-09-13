@@ -147,7 +147,11 @@ _ATTENDANCE_FIGURE_PATTERN = re.compile(r"\d+(\.\d+)?\s*(次|天|日|小時|分�
 # 限定第一、二人稱：「主管沒有權限看其他部門」是在陳述規定，是正常回答；「你／我這邊
 # 沒有權限」才是在拒絕這次提問。以 09-12、09-13 三份存檔的全部回答離線驗證過，只命中
 # 應該命中的題目。
-_PERMISSION_DENIAL_PATTERN = re.compile(r"(你|我)[^。！？\n]{0,6}沒有權限")
+#
+# 第二種說法「不在你的權限範圍」來自 `chat_tools._refusal()` 自己的拒絕訊息，模型經常
+# 照抄（09-13 第二輪，主管問他部門的張大同）。那是正確的權限說明，只認「沒有權限」會把它
+# 判成失敗。
+_PERMISSION_DENIAL_PATTERN = re.compile(r"(你|我)[^。！？\n]{0,6}沒有權限|不在你的權限範圍")
 
 
 def _answer_body(text: str) -> str:
@@ -578,8 +582,15 @@ def _report(
                 print(f"  {r.question} → {r.answer_error}")
             generation_failures.append(f"{len(errored)} 題呼叫 LLM 失敗")
 
-        # 排除拒答（沒有可引用的來源）與工具回答（答案來自系統資料，不是文件）。
-        citable = [r for r in answered if not r.answer_refused and not r.answer_tools]
+        # 排除拒答（沒有可引用的來源）、工具回答（答案來自系統資料，不是文件）與權限不足的
+        # 說明（「你沒有權限查看」不是政策內容，沒有東西可引用；09-13 第二輪同一題有時附、
+        # 有時不附，照舊計入只會讓這一項隨機紅）。權限句型若出現在該答的題目上，
+        # 「該答有答」那一項會抓到，不會因為這裡排除而漏掉。
+        citable = [
+            r
+            for r in answered
+            if not r.answer_refused and not r.answer_tools and not r.answer_permission_denied
+        ]
         cited = sum(1 for r in citable if r.answer_has_citation)
         citation_rate = cited / len(citable) if citable else 1.0
         print(f"回答附引用來源比率：{cited}/{len(citable)} = {citation_rate:.1%}（門檻 100%，分母排除拒答）")
