@@ -141,7 +141,9 @@ def _sweep(
 
 async def main_async(limit: int | None, sleep: float) -> None:
     data = yaml.safe_load(QUESTIONS_PATH.read_text(encoding="utf-8"))
-    items = data["questions"]
+    # 權限題組的答案來自工具與權限判斷，不是語料的某一節，跟檢索門檻無關：放進「真實問題」
+    # 會逼門檻去遷就一個本來就撈不到東西的問題，放進誘導題則會汙染分數重疊區間。
+    items = [i for i in data["questions"] if i.get("category") != "permission"]
     real_questions = [i["question"] for i in items if not i.get("expect_refusal")]
     lure_questions = [i["question"] for i in items if i.get("expect_refusal")]
     if limit:
