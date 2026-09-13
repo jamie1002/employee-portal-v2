@@ -79,7 +79,7 @@ async def ask(pool: asyncpg.Pool, client: GeminiClient, current_user: dict, ques
         settings = await _load_settings(pool, current_user["id"])
         user_content = chat_prompt.build_user_content(results, question, settings)
         text, tool_names = await asyncio.wait_for(
-            answer_with_tools(pool, client, current_user, user_content),
+            answer_with_tools(pool, client, current_user, user_content, question=question),
             timeout=app_settings.CHAT_TOTAL_TIMEOUT_SECONDS,
         )
     except TimeoutError as exc:
@@ -108,7 +108,7 @@ async def ask(pool: asyncpg.Pool, client: GeminiClient, current_user: dict, ques
 
 
 async def answer_with_tools(
-    pool: asyncpg.Pool, client: GeminiClient, current_user: dict, user_content: str
+    pool: asyncpg.Pool, client: GeminiClient, current_user: dict, user_content: str, *, question: str
 ) -> tuple[str, list[str]]:
     """帶工具清單問一次；模型要求呼叫工具就執行後再問一次，取得最終文字。
 
@@ -144,7 +144,10 @@ async def answer_with_tools(
     max_calls = len(tools[0].function_declarations)
     calls = turn.calls[:max_calls]
     results = [
-        (call.name, await chat_tools.execute(pool, current_user, call.name, call.args))
+        (
+            call.name,
+            await chat_tools.execute(pool, current_user, call.name, call.args, question=question),
+        )
         for call in calls
     ]
     # 第二輪才附加「工具數字不加但書」那段規則。放在第一輪會讓政策問答的推算但書

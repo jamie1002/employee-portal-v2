@@ -241,3 +241,53 @@ async def test_pending_reviews_can_filter_by_kind(pool):
     result = await chat_tools.execute(pool, MANAGER, "get_pending_reviews", {"kind": "leave"})
 
     assert all(item["類型"] == "leave" for item in result["待審申請單"])
+
+
+# ── 點名同事卻呼叫「只查本人」的工具 ─────────────────────────────────────────
+
+async def test_self_only_tool_is_not_run_when_question_names_colleague(pool):
+    """09-13 實測：員工問「張大同這週有沒有請假？」，模型呼叫 get_my_requests 拿到自己的
+    申請單，再講成「張大同這週沒有請假」。擋在這裡，模型就拿不到那份會被張冠李戴的結果。"""
+    for name in ("get_my_requests", "get_my_attendance_summary", "get_my_leave_quota", "get_today_status"):
+        result = await chat_tools.execute(
+            pool, EMPLOYEE, name, RANGE, question="張大同這週有沒有請假？"
+        )
+
+        assert result["ok"] is False, name
+        assert "張大同" in result["reason"]
+        assert "沒有權限" in result["reason"]
+
+
+async def test_self_only_tool_still_runs_when_question_names_only_self(pool):
+    """陳小華（EMPLOYEE）提到自己的名字不是在問別人。"""
+    result = await chat_tools.execute(
+        pool, EMPLOYEE, "get_my_requests", {}, question="我陳小華這週有請假嗎？"
+    )
+
+    assert result["ok"] is True
+
+
+async def test_self_only_tool_runs_for_plain_personal_question(pool):
+    result = await chat_tools.execute(pool, EMPLOYEE, "get_my_requests", {}, question="我這週有請假嗎？")
+
+    assert result["ok"] is True
+
+
+async def test_manager_gets_non_permission_wording_for_misrouted_self_tool(pool):
+    """主管其實查得到部門同事，只是模型選錯了工具——不能對他說「沒有權限」，
+    那正是 PITFALLS I14 修掉的錯誤訊息。"""
+    result = await chat_tools.execute(
+        pool, MANAGER, "get_my_attendance_summary", RANGE, question="陳小華這週遲到幾次？"
+    )
+
+    assert result["ok"] is False
+    assert "沒有權限" not in result["reason"]
+
+
+async def test_pending_reviews_is_not_blocked_by_colleague_name(pool):
+    """待審清單回的本來就是別人的單子，題目點名同事是正常用法。"""
+    result = await chat_tools.execute(
+        pool, MANAGER, "get_pending_reviews", {}, question="陳小華的請假單我審了沒？"
+    )
+
+    assert result["ok"] is True

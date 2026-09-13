@@ -232,13 +232,53 @@ def _format_time(value: object) -> str | None:
     return str(value)
 
 
-async def execute(pool: asyncpg.Pool, current_user: dict, name: str, args: dict) -> dict:
+# 只查得到提問者本人的工具（沒有「指定對象」參數）。`get_pending_reviews` 不在內：
+# 它回的本來就是別人送出的單子，題目提到同事姓名是正常用法。
+_SELF_ONLY_TOOLS = frozenset(
+    {"get_today_status", "get_my_attendance_summary", "get_my_leave_quota", "get_my_requests"}
+)
+
+
+async def _find_mentioned_colleague(pool: asyncpg.Pool, current_user: dict, question: str) -> str | None:
+    """題目裡有沒有點名提問者以外的同事，有的話回傳那個姓名。"""
+    members = await user_repository.find_all(pool)
+    for member in members:
+        if member["id"] != current_user["id"] and member["name"] and member["name"] in question:
+            return member["name"]
+    return None
+
+
+async def execute(
+    pool: asyncpg.Pool, current_user: dict, name: str, args: dict, *, question: str | None = None
+) -> dict:
     """執行一支工具並回傳要餵回模型的結構化結果。
 
     **這裡是安全邊界**：不在該角色允許清單內的名稱一律拒絕，不管模型為什麼會喊出它。
+
+    `question` 是使用者的原始提問。正式路徑（`chat.answer_with_tools`）一律要傳；
+    只有直接測試單支工具行為時才省略。
     """
     if name not in _allowed_names(current_user):
         return _refusal("這項資料不在你的權限範圍內，我無法查詢。")
+
+    # 題目點名了別的同事，模型卻呼叫「只查本人」的工具：不執行。
+    #
+    # 09-13 實測員工問「林小美這週有沒有請假？」，模型呼叫 get_my_requests，拿到的是
+    # **提問者自己**的申請單，再回答「林小美這週沒有請假紀錄」——資料沒有外洩（工具查不到
+    # 別人），但那是一句關於同事的錯誤事實。模型拿到一份「看起來能回答」的結果就會用，
+    # 這是提示詞管不住的；後端知道題目裡有沒有同事的名字，就不讓它拿到那份結果
+    # （與 PITFALLS I14 同一個原則：後端已知的條件不交給模型判斷）。
+    #
+    # 已知代價：「我跟林小美同一天請假，我的假核准了嗎？」這種問自己、順口提到同事的
+    # 問題也會被擋。寧可請使用者到系統頁面查，也不要冒著張冠李戴的風險。
+    if question and name in _SELF_ONLY_TOOLS:
+        colleague = await _find_mentioned_colleague(pool, current_user, question)
+        if colleague:
+            if "get_team_attendance_summary" in _allowed_names(current_user):
+                return _refusal(
+                    f"這支查詢只看得到你本人的資料，無法用來回答「{colleague}」的狀況。"
+                )
+            return _refusal(f"「{colleague}」的資料你目前沒有權限查看，我只能查你本人的紀錄。")
 
     try:
         return await _dispatch(pool, current_user, name, args)

@@ -403,7 +403,11 @@ async def run_eval(
                     # eval 若自己組一次不帶工具的 generate()，這 77 題就證明不了正式路徑
                     # 有沒有退化——而那正是批 B 唯一的硬性驗收條件。
                     generated_text, called_tools = await chat_service.answer_with_tools(
-                        pool, client, _ROLE_USERS[item.get("as_role", "employee")], user_content
+                        pool,
+                        client,
+                        _ROLE_USERS[item.get("as_role", "employee")],
+                        user_content,
+                        question=item["question"],
                     )
                     result.answer_tools = called_tools
                     break
