@@ -1,5 +1,19 @@
 # 黃金題庫（`SPEC.md` §7.1、`TASKS.md` 批 5）
 #
+# 題庫組成（2026-09-13，共 94 題）：
+#
+#   category: policy       81 題  政策問答（批 A）
+#     ├─ 一般政策題        62 題  依文件回答；其中 5 題的數字白紙黑字寫在語料裡（in_corpus: true）
+#     ├─ 推算題            12 題  語料沒寫死、要套規則算出的數字（in_corpus: false）
+#     └─ 誘導題             7 題  語料沒有答案，應說明文件沒寫（expect_refusal: true）
+#   category: permission    5 題  同一類問題以不同角色提問，驗證查得到的範圍（批 B）
+#   category: personal      6 題  個人資料、異常日期、通訊錄（批 B，09-13 補）
+#   category: chitchat      2 題  閒聊與情緒，不得呼叫工具
+#
+# 題數演進（程式碼註解與 PITFALLS 裡出現的舊題數都是「當時」的數字，不是寫錯）：
+#   72 題 第一階段原型搬移過來 → 77 題 批 A 第二版補推算題 → 82 題 09-12 推算題分母從 6 加到 12
+#   → 86 題 09-12 權限題組 → 87 題 09-13 補「員工點名問同事」→ 94 題 09-13 補 8 題、刪 1 題重複
+#
 # 設計原則：
 # 1. **先寫題庫、再看結果**。每一題的 expected_section_path 都是「讀語料判斷答案該在哪一節」
 #    寫出來的，不是「跑完檢索看回傳什麼就填什麼」——後者會讓 eval 永遠 100% 但毫無意義。
@@ -14,17 +28,28 @@
 #   question              必填。使用者可能會問的問題。
 #   expected_section_path 期望命中的章節路徑；誘導題若語料完全沒有對應章節則留空（null）。
 #   expected_points       期望答案要點（人工／AI 逐句對照用，也是批 6 生成端的驗收依據）。
-#   expect_refusal        true 代表這是誘導題，期望機器人明確拒答／說明不在文件範圍。
+#   category              policy | permission | personal | chitchat（見上方題庫組成）。
+#   as_role               以哪個身分提問：employee（預設）| manager | admin。
+#   expect_refusal        true 代表這是誘導題，期望說明文件沒有寫到。
+#   expect_permission_denied  true 代表正確行為是說明「沒有權限查看」（與誘導題不同：系統有
+#                         這份資料，只是這個身分看不到）。
+#   forbid_leak           true 代表回答不得出現權限範圍外同事的姓名或出勤數字。
+#   expect_tools          必須呼叫其中任一支工具；空清單 [] 代表不得呼叫任何工具。
+#   expected_dates        異常日期的 ground truth 來源：{start, end, employee_name?}，執行時用出勤
+#                         service 即時算出，回答必須逐日講到。
+#   expected_mentions     回答必須提到的資料：{extension_of: 姓名} 或 {members_of_my_department: true}，
+#                         執行時查資料庫取得。
 #   expected_number       數字型題目的 ground truth 來源宣告：
-#     function              special_leave_days | calculate_leave_hours
+#     function              special_leave_days | calculate_leave_hours | calculate_overtime_hours
 #     kwargs                傳給該函式的參數（時間一律台北時區，落在展示視窗 2026-08-24～08-31）
 #     unit                  單位（用來組出「{值} {單位}」字串，例如「14 日」「5 小時」）
-#     in_corpus             這個數字**有沒有**白紙黑字寫在語料裡。兩種值的檢查方向相反：
-#       true  → 語料寫死了這個數字。eval 會檢查 (a) 語料與 v2 函式算出來的一致、
-#               (b) 機器人的回答有把這個數字講出來。
-#       false → 語料沒有寫這個數字，要得到它必須自己做算術。依 `SPEC.md` §6.2 硬約束第 2 條，
-#               機器人**不得自行計算未出現在文件中的數字**，所以 eval 反過來要求
-#               **回答裡不可以出現這個數字**——出現就代表它自己算了，是本專案最危險的失敗模式。
+#     in_corpus             這個數字有沒有白紙黑字寫在語料裡。true 時額外檢查「語料與 v2 函式
+#                           算出來的一致」（驗證語料沒寫錯）。
+#     expect_stated         回答該不該講出這個數字：required（依據都在資料裡，必須推算並講出）|
+#                           optional（前提不明確，講不講都可以）。in_corpus: false 且講出數字時，
+#                           回答必須附上「以系統顯示為準」的但書。
+#                           （第一版的規則是「in_corpus: false 的數字不准出現在回答裡」，第二版
+#                           開放推算後已廢止，見 docs/PITFALLS.md I7。）
 
 questions:
   # ==========================================================
