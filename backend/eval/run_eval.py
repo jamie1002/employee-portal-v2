@@ -55,7 +55,7 @@ import asyncio
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import date, datetime, time
 from pathlib import Path
 from time import monotonic  # 注意：上面的 `time` 是 datetime.time，不是 time 模組
 
@@ -72,10 +72,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config.database import create_pool, set_pool  # noqa: E402
 from app.config.settings import app_settings  # noqa: E402
-from app.repositories import policy_repository  # noqa: E402
+from app.repositories import policy_repository, user_repository  # noqa: E402
+from app.services import attendance as attendance_service  # noqa: E402
 from app.services import chat as chat_service  # noqa: E402
 from app.services import chat_prompt  # noqa: E402
-from app.services import settings as settings_service  # noqa: E402
 from app.services.leave_hours import calculate_leave_hours, calculate_overtime_hours  # noqa: E402
 from app.services.leave_quota import special_leave_days  # noqa: E402
 from app.services.policy_retrieval import RetrievalResult  # noqa: E402
@@ -108,8 +108,21 @@ TZ = "Asia/Taipei"
 _QUOTA_RETRIES = 3
 _QUOTA_RETRY_WAIT = 30
 
-# 檢索落空的內部標記：eval 不為這條路徑呼叫 API（見下方說明）。
-_NO_CONTEXT_MARKER = "（檢索落空，未呼叫政策問答生成）"
+# 「異常」的四種狀態，與 chat_tools._ABNORMAL_STATUSES 相同（請假不算異常）。
+_ABNORMAL_STATUS_KEYS = ("late", "early_leave", "absent", "missing_punch_out")
+
+
+def _date_pattern(day: date) -> re.Pattern:
+    """回答裡提到某一天的各種寫法：2026-07-02、7/2、07/02、7 月 2 日、以及同一句已經講過
+    月份之後只寫「2 日」「2 號」。
+
+    只寫日的那種刻意要求前面不是數字、斜線或「月」，否則「12 日」會被當成「2 日」。
+    """
+    m, d = day.month, day.day
+    return re.compile(
+        rf"(?<!\d)(?:{day.year}-0?{m}-0?{d}|0?{m}\s*/\s*0?{d}|0?{m}\s*月\s*0?{d}\s*[日號]"
+        rf"|(?<![\d/月-])0?{d}\s*[日號])(?!\d)"
+    )
 
 # 跑政策題時模擬的身分。用 employee 是刻意的**最保守選擇**：它拿到的工具清單最小，
 # 代表大多數使用者的實際情境。若日後新增以主管／管理員身分驗證的權限題組，
@@ -241,6 +254,25 @@ class QuestionResult:
 
     answer_permission_denied: bool | None = None
 
+    expect_tools: list[str] | None = None
+    """這題應該呼叫哪些工具（呼叫其中任一支即算對）。空清單代表**不得**呼叫任何工具
+    （閒聊、情緒）。`None` 代表不檢查。
+
+    09-13 以前 eval 只記錄有沒有呼叫工具、不判斷該不該呼叫，於是「列出日期」被分到
+    沒有工具的路徑、回「沒有權限」這種失敗，就算題目在題庫裡也看不出來（PITFALLS I17）。"""
+
+    answer_tools_ok: bool | None = None
+
+    expected_dates: list[date] | None = None
+    """異常日期的 ground truth，執行時用出勤 service 即時算出（跟數字題一樣不手填）。"""
+
+    answer_dates_missing: list[date] = field(default_factory=list)
+
+    expected_mentions: list[str] | None = None
+    """回答必須提到的字串（通訊錄題的分機、部門成員姓名），執行時查資料庫即時取得。"""
+
+    answer_mentions_missing: list[str] = field(default_factory=list)
+
     answer_tools: list[str] = field(default_factory=list)
     """這題實際呼叫了哪些查詢工具。**工具回答沒有文件出處可引用**，所以要排除在
     引用率的分母之外——這與「拒答不計入引用率」是同一個道理。"""
@@ -263,7 +295,7 @@ class QuestionResult:
     """推算出來的答案有沒有加上「以系統顯示為準」這類但書（系統提示規則 2 的硬性要求）。"""
 
     should_be_answered: bool = True
-    """這題是否「必須答得出來」。只有誘導題（expect_refusal）除外——語料真的沒有答案，
+    """這題是否「必須答得出來」。誘導題（expect_refusal）、權限題與閒聊題除外——語料真的沒有答案，
     本來就該拒答。第二版開放推算之後，推算題也必須答得出來（第一版把它們排除在這項
     檢查之外，等於默許助理對「9:20 算不算遲到」這類問題擺爛）。"""
 
@@ -288,6 +320,51 @@ def _compute_ground_truth(spec: dict) -> float | int:
         return function(total_months=kwargs["total_months"])
     # calculate_leave_hours / calculate_overtime_hours 的簽名相同
     return function(_taipei(kwargs["start"]), _taipei(kwargs["end"]), _GROUND_TRUTH_SETTINGS, TZ)
+
+
+async def _user_id_by_name(pool: asyncpg.Pool, name: str) -> int:
+    matched = [row["id"] for row in await user_repository.find_all(pool) if row["name"] == name]
+    if len(matched) != 1:
+        raise SystemExit(f"questions.yaml 指定的同事「{name}」在資料庫裡不是恰好一位")
+    return matched[0]
+
+
+async def _compute_expected_dates(pool: asyncpg.Pool, spec: dict, as_role: str) -> list[date]:
+    """異常日期的 ground truth：走出勤頁同一支 service 與同一個狀態判定。
+
+    **刻意不經過 chat_tools**：拿工具自己的輸出當答案，工具算錯時 eval 也跟著錯，
+    等於沒有檢查。這裡直接用出勤頁的篩選邏輯，量的是「AI 講的跟畫面一不一致」。
+    """
+    user_id = (
+        await _user_id_by_name(pool, spec["employee_name"])
+        if spec.get("employee_name")
+        else _ROLE_USERS[as_role]["id"]
+    )
+    page = await attendance_service.get_my_records(
+        pool, user_id,
+        start_date=date.fromisoformat(spec["start"]), end_date=date.fromisoformat(spec["end"]),
+        page_size=1000,
+    )
+    return sorted({
+        row["punch_date"] for row in page["records"]
+        if any(attendance_service.matches_status_filter(row, key) for key in _ABNORMAL_STATUS_KEYS)
+    })
+
+
+async def _compute_expected_mentions(pool: asyncpg.Pool, spec: dict, as_role: str) -> list[str]:
+    """通訊錄題的 ground truth，查資料庫即時取得（展示資料重置後分機可能不同）。"""
+    if spec.get("extension_of"):
+        user_id = await _user_id_by_name(pool, spec["extension_of"])
+        user = await user_repository.find_public_by_id(pool, user_id)
+        return [user["extension_number"]]
+    if spec.get("members_of_my_department"):
+        # 提問者本人不列入：「除了你之外還有王小明」是完全正確的回答。
+        requester = _ROLE_USERS[as_role]
+        return [
+            row["name"] for row in await user_repository.find_all(pool, requester["department_id"])
+            if row["id"] != requester["id"]
+        ]
+    raise SystemExit(f"questions.yaml 的 expected_mentions 無法解析：{spec}")
 
 
 async def _load_corpus_by_section_path(pool: asyncpg.Pool) -> dict[str, str]:
@@ -318,8 +395,6 @@ async def run_eval(
 ) -> tuple[list[QuestionResult], dict[str, str]]:
     client = get_gemini_client()
     corpus = await _load_corpus_by_section_path(pool)
-    # 與正式問答路徑一致：推算的基準取自系統當前生效的考勤設定，不是語料寫死的預設值。
-    live_settings = await settings_service.get_settings(pool)
     results: list[QuestionResult] = []
 
     started_at = monotonic()
@@ -341,12 +416,23 @@ async def run_eval(
             expected_section_path=expected_path,
             expect_refusal=bool(item.get("expect_refusal", False)),
             should_be_answered=not (
-                item.get("expect_refusal", False) or item.get("expect_permission_denied", False)
+                item.get("expect_refusal", False)
+                or item.get("expect_permission_denied", False)
+                or item.get("category") == "chitchat"
             ),
             as_role=item.get("as_role", "employee"),
             forbid_leak=bool(item.get("forbid_leak", False)),
             expect_permission_denied=bool(item.get("expect_permission_denied", False)),
+            expect_tools=item.get("expect_tools"),
         )
+        if item.get("expected_dates"):
+            result.expected_dates = await _compute_expected_dates(
+                pool, item["expected_dates"], result.as_role
+            )
+        if item.get("expected_mentions"):
+            result.expected_mentions = await _compute_expected_mentions(
+                pool, item["expected_mentions"], result.as_role
+            )
 
         retrieved = await _search_unfiltered(pool, client, item["question"], max(3, app_settings.RETRIEVAL_TOP_K))
         result.top_paths = [r.section_path for r in retrieved]
@@ -390,28 +476,21 @@ async def run_eval(
             generated_text: str | None = None
             for attempt in range(_QUOTA_RETRIES):
                 try:
-                    if not usable:
-                        # 檢索落空：正式環境走 FALLBACK_PROMPT 生成自然回應，但 eval
-                        # 不需要為此燒配額——這條路徑必定是拒答，指標上的意義只有
-                        # 「誘導題有沒有被擋下」，直接標記即可。
-                        generated_text = _NO_CONTEXT_MARKER
-                        break
-                    # 必須跟 `chat.py` 一樣注入系統當前生效的考勤設定——少了它，
-                    # eval 測到的是一個「拿不到設定」的降級環境，模型會多講一句
-                    # 「系統設定無法取得」，評出來的品質與正式路徑不一致。
-                    user_content = chat_prompt.build_user_content(
-                        usable, item["question"], live_settings
-                    )
-                    # **必須走正式環境的同一支函式**：批 B 之後模型是帶著工具清單被呼叫的，
-                    # 而工具清單會改變它在政策問題上的措辭（探針實測，見 design.md Step 0）。
-                    # eval 若自己組一次不帶工具的 generate()，這 77 題就證明不了正式路徑
-                    # 有沒有退化——而那正是批 B 唯一的硬性驗收條件。
-                    generated_text, called_tools = await chat_service.answer_with_tools(
+                    # **必須走正式環境的同一支函式**，包含檢索落空的題目。
+                    #
+                    # 09-13 以前這裡遇到檢索落空就直接標記拒答、不呼叫生成，理由是「落空
+                    # 路徑必定是拒答」——那在落空路徑不帶工具時成立。它同時讓 eval 完全看不到
+                    # 「個人資料題搜不到文件就查不到」這個 bug（PITFALLS I17）。現在落空路徑也帶
+                    # 工具，必須實際跑一次才知道模型有沒有去查。
+                    #
+                    # 考勤設定的注入、工具清單、提示詞的選擇都在 answer_question() 裡，
+                    # eval 自己組任何一段都可能跟正式路徑分歧。
+                    generated_text, called_tools = await chat_service.answer_question(
                         pool,
                         client,
                         _ROLE_USERS[item.get("as_role", "employee")],
-                        user_content,
-                        question=item["question"],
+                        item["question"],
+                        usable,
                     )
                     result.answer_tools = called_tools
                     break
@@ -444,10 +523,32 @@ async def run_eval(
                 result.answer_permission_denied = (
                     _PERMISSION_DENIAL_PATTERN.search(_answer_body(generated_text)) is not None
                 )
-                # 落空路徑不靠字串比對——那條路徑本來就沒有依據，必定是拒答。
-                result.answer_refused = (
-                    True if generated_text == _NO_CONTEXT_MARKER else chat_prompt.is_refusal(generated_text)
-                )
+                # 與 chat.ask() 的 kind 判定一致：檢索落空又沒有呼叫工具就是拒答（寒暄、
+                # 文件沒涵蓋的主題），不靠字串比對；有呼叫工具則是個人資料回答，不算拒答。
+                if result.answer_tools:
+                    result.answer_refused = False
+                elif not usable:
+                    result.answer_refused = True
+                else:
+                    result.answer_refused = chat_prompt.is_refusal(generated_text)
+
+                if result.expect_tools is not None:
+                    if result.expect_tools:
+                        result.answer_tools_ok = any(t in result.answer_tools for t in result.expect_tools)
+                    else:
+                        # 閒聊不得呼叫工具，也不得冒出「你沒有權限」這種莫名其妙的回答。
+                        result.answer_tools_ok = (
+                            not result.answer_tools and not result.answer_permission_denied
+                        )
+                if result.expected_dates is not None:
+                    result.answer_dates_missing = [
+                        day for day in result.expected_dates
+                        if not _date_pattern(day).search(_answer_body(generated_text))
+                    ]
+                if result.expected_mentions is not None:
+                    result.answer_mentions_missing = [
+                        text for text in result.expected_mentions if text and text not in generated_text
+                    ]
                 source_files = {source.source_file for source in usable}
                 result.answer_has_citation = "依據：" in generated_text and any(
                     source_file in generated_text for source_file in source_files
@@ -698,6 +799,51 @@ def _report(
                 print(f"     回答：{(r.answer_text or '')[:160]}")
             if leaked:
                 generation_failures.append("越權題洩漏了權限範圍外的他人資料")
+
+        tool_checked = [r for r in answered if r.answer_tools_ok is not None]
+        if tool_checked:
+            tool_ok = sum(1 for r in tool_checked if r.answer_tools_ok)
+            print(
+                f"工具使用正確：{tool_ok}/{len(tool_checked)} = {tool_ok / len(tool_checked):.1%}（門檻 100%）\n"
+                "  （個人資料題不論問法有沒有搜到文件都要去查；閒聊題不得呼叫工具）"
+            )
+            for r in tool_checked:
+                if not r.answer_tools_ok:
+                    expected = "、".join(r.expect_tools) if r.expect_tools else "不呼叫任何工具"
+                    actual = "、".join(r.answer_tools) or "沒有呼叫"
+                    print(f"  FAIL 工具使用錯誤（期望 {expected}，實際 {actual}）：{r.question}")
+                    print(f"     回答：{(r.answer_text or '')[:160]}")
+            if tool_ok != len(tool_checked):
+                generation_failures.append("有題目沒有正確使用查詢工具")
+
+        dated = [r for r in answered if r.expected_dates is not None]
+        if dated:
+            dated_ok = [r for r in dated if not r.answer_dates_missing]
+            print(
+                f"異常日期完整：{len(dated_ok)}/{len(dated)} = {len(dated_ok) / len(dated):.1%}（門檻 100%）\n"
+                "  （ground truth 由出勤頁同一支 service 即時算出，回答必須逐日講到）"
+            )
+            for r in dated:
+                if r.answer_dates_missing:
+                    missing = "、".join(day.isoformat() for day in r.answer_dates_missing)
+                    print(f"  FAIL 漏講的日期（{missing}）：{r.question}")
+                    print(f"     回答：{(r.answer_text or '')[:200]}")
+            if len(dated_ok) != len(dated):
+                generation_failures.append("有異常日期沒有講出來")
+
+        mentioned = [r for r in answered if r.expected_mentions is not None]
+        if mentioned:
+            mention_ok = [r for r in mentioned if not r.answer_mentions_missing]
+            print(
+                f"通訊錄答案正確：{len(mention_ok)}/{len(mentioned)} = "
+                f"{len(mention_ok) / len(mentioned):.1%}（門檻 100%）"
+            )
+            for r in mentioned:
+                if r.answer_mentions_missing:
+                    print(f"  FAIL 沒有講到（{'、'.join(r.answer_mentions_missing)}）：{r.question}")
+                    print(f"     回答：{(r.answer_text or '')[:160]}")
+            if len(mention_ok) != len(mentioned):
+                generation_failures.append("有通訊錄題沒有答出正確資料")
         print()
 
     # hit@3 與章節覆蓋率只在「跑完整題庫」時才有意義。用 --category／--limit 跑子集時，
@@ -735,6 +881,10 @@ def _format_answers_for_review(results: list[QuestionResult], questions: list[di
             kind = "誘導題"
         elif result.expect_permission_denied:
             kind = "權限不足題"
+        elif item.get("category") == "chitchat":
+            kind = "閒聊題"
+        elif item.get("category") == "personal":
+            kind = "個人資料題"
         elif result.number_label and not result.number_in_corpus:
             kind = "推算題"
         else:

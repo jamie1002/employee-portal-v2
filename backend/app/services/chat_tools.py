@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import asyncpg
 import google.generativeai as genai
@@ -28,6 +29,7 @@ from app.services import department as department_service
 from app.services import leave_quota as leave_quota_service
 from app.services import leave_request, overtime_request, punch_request
 from app.services import settings as settings_service
+from app.services import user as user_service
 from app.services.work_hours import WorkSettings, daily_work_hours
 from app.utils.errors import AppError
 from app.utils.timezone import get_business_date
@@ -38,6 +40,23 @@ _T = genai.protos.Type
 # 回給模型的明細筆數上限。聚合過的統計才是答案，明細只是讓回答能舉例；
 # 全部回去會讓第二輪的輸入暴增，延遲與配額都吃不消（design.md Decision 4）。
 _MAX_DETAIL_ROWS = 10
+
+# 區間超過 `_MAX_DETAIL_ROWS` 天時，明細只列異常的日子，最多這麼多筆（一個月的上限）。
+_MAX_ABNORMAL_ROWS = 31
+
+# 「異常」的四種狀態與中文標籤。刻意用中文標籤回給模型：英文代碼要模型自己翻譯，
+# 它會翻成「延遲」「提早離開」這類跟畫面不一致的說法。
+_ABNORMAL_STATUSES = (
+    ("late", "遲到"),
+    ("early_leave", "早退"),
+    ("absent", "缺勤"),
+    ("missing_punch_out", "未打下班卡"),
+)
+
+_MAX_DIRECTORY_ROWS = 50
+
+# 與前端 `EmployeePage.jsx` 的 ROLE_LABEL 一致。
+_ROLE_LABELS = {"admin": "系統管理者", "manager": "部門主管", "employee": "一般員工"}
 
 _REQUEST_SERVICES = {
     "leave": leave_request,
@@ -73,7 +92,7 @@ def _personal_declarations() -> list[genai.protos.FunctionDeclaration]:
         _declaration(
             "get_my_attendance_summary",
             "查詢提問者「自己」某一段期間的出勤統計，包含出勤天數、遲到次數、"
-            "早退次數、缺勤天數、請假天數，並附上幾筆代表性的明細。"
+            "早退次數、缺勤天數、請假天數，以及遲到／早退／缺勤／未打下班卡各是哪幾天。"
             "只能查本人，無法查詢其他同事。",
             {
                 "start_date": _string("起始日期，格式 YYYY-MM-DD"),
@@ -99,6 +118,20 @@ def _personal_declarations() -> list[genai.protos.FunctionDeclaration]:
                                 "punch（補打卡）。省略表示三種都查。"),
                 "status": _string("審核狀態，可填 pending（待審核）、approved（已核准）、"
                                   "rejected（已駁回）。省略表示全部。"),
+            },
+        ),
+        _declaration(
+            "search_directory",
+            "查詢公司通訊錄：同事的姓名、部門、角色（例如部門主管）、分機、email、到職日。"
+            "全公司每個人都查得到，與出勤資料的權限無關。",
+            {
+                "employee_name": _string("要找的同事姓名，可以只填部分姓名。省略表示不限。"),
+                "department_name": _string("部門名稱，例如「研發部」。省略表示不限。"),
+                "only_my_department": genai.protos.Schema(
+                    type=_T.BOOLEAN,
+                    description="只列提問者自己部門的人時填 true，"
+                                "例如「我的部門有哪些人」「我主管的分機」。",
+                ),
             },
         ),
     ]
@@ -139,7 +172,8 @@ def _team_declarations(role: str) -> list[genai.protos.FunctionDeclaration]:
         _declaration(
             "get_team_attendance_summary",
             f"查詢{scope_hint}的出勤統計，會依每個人分別列出出勤天數、遲到次數、"
-            "早退次數與缺勤天數，適合回答「誰遲到最多」這類問題。",
+            "早退次數、缺勤天數，以及這些異常各是哪幾天。"
+            "適合回答「誰遲到最多」「某位同事哪幾天遲到」這類問題。",
             team_properties,
             ["start_date", "end_date"],
         ),
@@ -189,26 +223,61 @@ class _ToolArgumentError(ValueError):
     瞎猜出來的區間會產出一個看起來很合理但完全錯誤的答案。"""
 
 
+def _iso_date(value: object) -> str:
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _abnormal_labels(row: dict) -> list[str]:
+    return [
+        label for key, label in _ABNORMAL_STATUSES
+        if attendance_service.matches_status_filter(row, key)
+    ]
+
+
+def _abnormal_dates(records: list[dict]) -> dict[str, list[str]]:
+    """依異常種類列出日期（由早到晚），沒有的種類不列。
+
+    **這份清單不截斷**——它就是「我哪幾天異常」的答案本身。09-13 以前工具只回
+    「最近 10 天」的明細，7 月的異常都在月初，模型拿得到次數卻拿不到日期，只能叫
+    使用者自己去系統查（見 PITFALLS I17）。日期字串很短，一整年也只有幾百個 token。
+    """
+    dates: dict[str, list[str]] = {}
+    for key, label in (*_ABNORMAL_STATUSES, ("on_leave", "請假")):
+        matched = sorted(
+            _iso_date(row["punch_date"]) for row in records
+            if attendance_service.matches_status_filter(row, key)
+        )
+        if matched:
+            dates[label] = matched
+    return dates
+
+
 def _summarize_attendance(records: list[dict]) -> dict:
     """把出勤列聚合成統計。
 
     狀態判定一律走 `attendance.matches_status_filter()`，不自己比對 `effective_status`。
     「正常」這個狀態帶著一個很容易錯的細節：狀態是 normal 但當天早退或未打下班卡的
     日子**不算正常**。自己重寫一遍一定會跟出勤頁的篩選結果對不起來。
+
+    明細的取捨：區間很短（例如只查某一天）就全列，讓「我 8/19 幾點打卡」答得出來；
+    區間長就只列異常的日子——使用者要的是那幾天的上下班時間，不是二十幾天的正常出勤。
     """
     counts = {
         key: sum(1 for row in records if attendance_service.matches_status_filter(row, key))
         for key in ("normal", "late", "absent", "early_leave", "on_leave", "missing_punch_out")
     }
+    ordered = sorted(records, key=lambda row: _iso_date(row["punch_date"]))
+    only_abnormal = len(ordered) > _MAX_DETAIL_ROWS
+    detail_rows = [row for row in ordered if _abnormal_labels(row)] if only_abnormal else ordered
     details = [
         {
-            "日期": row["punch_date"].isoformat() if hasattr(row["punch_date"], "isoformat") else str(row["punch_date"]),
+            "日期": _iso_date(row["punch_date"]),
             "上班時間": _format_time(row.get("effective_punch_in_time")),
             "下班時間": _format_time(row.get("effective_punch_out_time")),
-            "狀態": row.get("effective_status"),
+            "異常": _abnormal_labels(row) or None,
             "工時": row.get("effective_work_hours"),
         }
-        for row in records[:_MAX_DETAIL_ROWS]
+        for row in detail_rows[:_MAX_ABNORMAL_ROWS]
     ]
     return {
         "ok": True,
@@ -219,14 +288,24 @@ def _summarize_attendance(records: list[dict]) -> dict:
         "缺勤天數": counts["absent"],
         "請假天數": counts["on_leave"],
         "未打下班卡天數": counts["missing_punch_out"],
+        "異常日期": _abnormal_dates(records),
+        "明細範圍": "只列有異常的日子" if only_abnormal else "區間內每一天",
         "明細": details,
-        "明細是否截斷": len(records) > _MAX_DETAIL_ROWS,
+        "明細是否截斷": len(detail_rows) > _MAX_ABNORMAL_ROWS,
     }
 
 
 def _format_time(value: object) -> str | None:
+    """打卡時間轉成台北時間的 HH:MM。
+
+    **TIMESTAMPTZ 從 asyncpg 回來是 UTC**，直接 strftime 會把 09:00 上班寫成 01:00。
+    09-13 以前工具就是這樣把時間回給模型的（全部差 8 小時），只是舊版明細很少被
+    講出來，一直沒人發現；補測試斷言具體時間才抓到。
+    """
     if value is None:
         return None
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        value = value.astimezone(ZoneInfo(app_settings.APP_TIMEZONE))
     if hasattr(value, "strftime"):
         return value.strftime("%H:%M")
     return str(value)
@@ -400,7 +479,51 @@ async def _dispatch(pool: asyncpg.Pool, current_user: dict, name: str, args: dic
         summary["查詢區間"] = f"{start_date.isoformat()} 至 {end_date.isoformat()}"
         return summary
 
+    if name == "search_directory":
+        return await _search_directory(pool, current_user, args)
+
     return _refusal("我目前沒有辦法查詢這項資料。")
+
+
+async def _search_directory(pool: asyncpg.Pool, current_user: dict, args: dict) -> dict:
+    """通訊錄。範圍與欄位**完全比照前端「員工資訊」頁**：任何角色都看得到全公司
+    （SPEC §3 權限矩陣、`GET /api/users`），欄位是頁面上顯示的那幾欄，不多給。
+
+    與出勤工具不同，這裡**不做範圍限縮**，也不受「點名同事」的擋法影響——
+    查同事的分機本來就是點名同事。
+    """
+    department_id = await _resolve_department_name(pool, _clean_optional(args.get("department_name")))
+    members = await user_service.list_users(pool, department_id)
+
+    requester = next((m for m in members if m["id"] == current_user["id"]), None)
+    if requester is None:
+        requester = await user_repository.find_public_by_id(pool, current_user["id"])
+    my_department = requester["department_name"] if requester else None
+
+    if args.get("only_my_department") is True:
+        members = [m for m in members if m["department_id"] == current_user["department_id"]]
+    employee_name = _clean_optional(args.get("employee_name"))
+    if employee_name:
+        members = [m for m in members if employee_name in (m["name"] or "")]
+
+    return {
+        "ok": True,
+        "提問者所屬部門": my_department,
+        "人數": len(members),
+        "名單": [
+            {
+                "姓名": m["name"],
+                "員工編號": m["employee_no"],
+                "部門": m["department_name"],
+                "角色": _ROLE_LABELS.get(m["role"], m["role"]),
+                "分機": m["extension_number"],
+                "email": m["email"],
+                "到職日": _iso_date(m["hire_date"]) if m["hire_date"] else None,
+            }
+            for m in members[:_MAX_DIRECTORY_ROWS]
+        ],
+        "名單是否截斷": len(members) > _MAX_DIRECTORY_ROWS,
+    }
 
 
 async def _resolve_employee_name(pool: asyncpg.Pool, employee_name: str | None) -> int | None:
@@ -441,8 +564,10 @@ def _summarize_team_attendance(records: list[dict]) -> dict:
     而且模型自己數一定會跟畫面上的統計對不起來（見 design.md Decision 4）。
     """
     by_person: dict[str, dict] = {}
+    rows_by_person: dict[str, list[dict]] = {}
     for row in records:
         person = row.get("user_name") or "（未知）"
+        rows_by_person.setdefault(person, []).append(row)
         entry = by_person.setdefault(
             person,
             {"姓名": person, "部門": row.get("department_name"), "出勤天數": 0,
@@ -453,6 +578,11 @@ def _summarize_team_attendance(records: list[dict]) -> dict:
                            ("缺勤天數", "absent"), ("請假天數", "on_leave")):
             if attendance_service.matches_status_filter(row, key):
                 entry[label] += 1
+
+    # 每個人附上異常日期。只給日期、不給每天的上下班時間：全公司一個月的明細會讓第二輪
+    # 輸入暴增，而「哪幾天」通常就是主管要的答案。
+    for person, entry in by_person.items():
+        entry["異常日期"] = _abnormal_dates(rows_by_person[person])
 
     people = sorted(by_person.values(), key=lambda e: e["遲到次數"], reverse=True)
     return {"ok": True, "人數": len(people), "總筆數": len(records), "各人統計": people}

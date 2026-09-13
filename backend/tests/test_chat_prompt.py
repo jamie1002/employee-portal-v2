@@ -177,3 +177,48 @@ def test_team_rules_are_selected_by_backend_not_by_the_model():
     # 沒有團隊工具的角色：要用「沒有權限」解釋，而不是說文件沒寫或系統沒這功能
     assert "沒有權限查看" in without_team
     assert "get_team_attendance_summary" not in without_team
+
+
+def test_no_context_prompt_is_built_on_the_restricted_fallback():
+    """檢索落空時也帶工具規則（PITFALLS I17），但底必須是受限的 FALLBACK_PROMPT：
+    沒有文件依據時絕不能拿到 SYSTEM_PROMPT 那套「可以推算規定」的規則。"""
+    from datetime import date
+
+    prompt = chat_prompt.build_system_prompt(date(2026, 9, 13), has_context=False)
+
+    assert prompt.startswith(chat_prompt.FALLBACK_PROMPT)
+    assert chat_prompt.SYSTEM_PROMPT not in prompt
+    assert "search_directory" in prompt
+    assert "2026-09-13" in prompt
+    # 第一輪還沒有任何資料，「可以照實說出日期與次數」那段不能出現。
+    assert chat_prompt._FALLBACK_TOOL_RESULT_NOTE not in prompt
+
+
+def test_no_context_second_round_allows_stating_tool_data():
+    """FALLBACK_PROMPT 禁止說出具體時間與天數；不在第二輪講清楚那指的是規定，
+    模型會拿著查到的日期卻叫使用者自己去系統查。"""
+    from datetime import date
+
+    prompt = chat_prompt.build_system_prompt(date(2026, 9, 13), has_context=False, with_tool_results=True)
+
+    assert prompt.endswith(chat_prompt.TOOL_RESULT_RULES)
+    assert chat_prompt._FALLBACK_TOOL_RESULT_NOTE in prompt
+
+
+def test_fallback_prompt_no_longer_refuses_personal_attendance():
+    """舊版寫著「個人出勤紀錄、假別剩餘量、申請進度沒辦法回答」，而那些現在都有工具。"""
+    assert "個人出勤紀錄" not in chat_prompt.FALLBACK_PROMPT
+    assert "申請進度" not in chat_prompt.FALLBACK_PROMPT
+
+
+def test_directory_is_never_described_as_permission_restricted():
+    """通訊錄全公司都查得到（SPEC 權限矩陣）。09-13 員工問「我的部門有哪些人」被回
+    「沒有權限」，是「別人的資料 → 沒有權限」這條規則的過度套用。"""
+    from datetime import date
+
+    for has_team_tools in (True, False):
+        for has_context in (True, False):
+            prompt = chat_prompt.build_system_prompt(
+                date(2026, 9, 13), has_team_tools=has_team_tools, has_context=has_context
+            )
+            assert "通訊錄全公司每個人都查得到" in prompt

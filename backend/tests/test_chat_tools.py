@@ -77,18 +77,115 @@ async def test_normal_excludes_early_leave_and_missing_punch_out(pool, db):
     assert result["未打下班卡天數"] >= 1
 
 
-async def test_attendance_summary_truncates_details_but_keeps_totals(pool, db):
-    for day in range(1, 21):
-        await _insert(db, EMPLOYEE_ID, date(2026, 7, day), taipei(2026, 7, day, 9, 0), taipei(2026, 7, day, 18, 0))
+async def test_long_range_lists_every_abnormal_date_even_early_in_the_range(pool, db):
+    """**守的是 09-13 實測的 bug**：舊版明細只取「最近 10 天」，7 月的異常都在月初，
+    模型拿得到次數卻拿不到日期（PITFALLS I17）。異常日期必須完整，與位置無關。"""
+    await db.execute("DELETE FROM attendances WHERE user_id = $1 AND punch_date BETWEEN $2 AND $3",
+                     EMPLOYEE_ID, pg_date(date(2026, 7, 1)), pg_date(date(2026, 7, 31)))
+    for day in range(1, 32):
+        if date(2026, 7, day).weekday() >= 5:
+            continue
+        # 9:30 遲到的那天正常工時結束會往後推，18:30 下班才不會同時算早退。
+        punch_in = taipei(2026, 7, day, 9, 30) if day == 2 else taipei(2026, 7, day, 9, 0)
+        punch_out = taipei(2026, 7, day, 18, 30) if day == 2 else taipei(2026, 7, day, 18, 0)
+        status = "late" if day == 2 else "normal"
+        await _insert(db, EMPLOYEE_ID, date(2026, 7, day), punch_in, punch_out, status)
 
     result = await chat_tools.execute(
         pool, EMPLOYEE, "get_my_attendance_summary",
         {"start_date": "2026-07-01", "end_date": "2026-07-31"},
     )
 
-    assert len(result["明細"]) <= 10
-    assert result["明細是否截斷"] is True
     assert result["總天數"] > 10
+    assert "2026-07-02" in result["異常日期"]["遲到"]
+    # 區間長時明細只列異常的日子，而且那一天一定在裡面。
+    assert result["明細範圍"] == "只列有異常的日子"
+    assert [row["日期"] for row in result["明細"]] == ["2026-07-02"]
+    assert result["明細"][0]["異常"] == ["遲到"]
+
+
+async def test_short_range_lists_every_day(pool, db):
+    """只查一兩天時全列，讓「我 8/19 幾點打卡」這種不是在問異常的問題也答得出來。"""
+    await _insert(db, EMPLOYEE_ID, WEDNESDAY, taipei(2026, 8, 19, 9, 0), taipei(2026, 8, 19, 18, 0))
+
+    result = await chat_tools.execute(
+        pool, EMPLOYEE, "get_my_attendance_summary",
+        {"start_date": "2026-08-19", "end_date": "2026-08-19"},
+    )
+
+    assert result["明細範圍"] == "區間內每一天"
+    assert result["明細"][0]["上班時間"] == "09:00"
+
+
+async def test_abnormal_dates_agree_with_the_attendance_page_filter(pool, db):
+    """異常日期必須跟出勤頁的狀態篩選逐日一致——一樣走 matches_status_filter。"""
+    await _insert(db, EMPLOYEE_ID, THURSDAY, taipei(2026, 8, 20, 9, 0), taipei(2026, 8, 20, 17, 0))  # 早退
+    await _insert(db, EMPLOYEE_ID, FRIDAY, taipei(2026, 8, 21, 9, 0))  # 未打下班卡
+
+    result = await chat_tools.execute(
+        pool, EMPLOYEE, "get_my_attendance_summary",
+        {"start_date": "2026-08-01", "end_date": "2026-08-31"},
+    )
+
+    for status, label in (("early_leave", "早退"), ("missing_punch_out", "未打下班卡"), ("late", "遲到")):
+        page = await attendance_service.get_my_records(
+            pool, EMPLOYEE_ID, start_date=date(2026, 8, 1), end_date=date(2026, 8, 31),
+            status=status, page_size=1000,
+        )
+        expected = sorted(str(row["punch_date"]) for row in page["records"])
+        assert result["異常日期"].get(label, []) == expected, label
+
+
+async def test_team_summary_includes_each_members_abnormal_dates(pool, db):
+    await _insert(db, EMPLOYEE_ID, WEDNESDAY, taipei(2026, 8, 19, 9, 30), taipei(2026, 8, 19, 18, 0), "late")
+
+    result = await chat_tools.execute(
+        pool, MANAGER, "get_team_attendance_summary",
+        {"start_date": "2026-08-19", "end_date": "2026-08-19", "employee_name": "陳小華"},
+    )
+
+    person = result["各人統計"][0]
+    assert person["姓名"] == "陳小華"
+    assert person["異常日期"]["遲到"] == ["2026-08-19"]
+
+
+# ── 通訊錄 ─────────────────────────────────────────────────────────────────
+
+async def test_directory_is_company_wide_for_every_role(pool):
+    """範圍比照前端「員工資訊」頁：一般員工也看得到全公司（SPEC 權限矩陣）。"""
+    result = await chat_tools.execute(pool, EMPLOYEE, "search_directory", {}, question="業務部有誰？")
+
+    assert result["ok"] is True
+    names = {row["姓名"] for row in result["名單"]}
+    assert {"陳小華", "張大同"} <= names
+
+
+async def test_directory_fields_match_the_employee_page(pool):
+    """欄位與頁面上顯示的一致，不多給（沒有密碼雜湊、沒有權限清單）。"""
+    result = await chat_tools.execute(pool, EMPLOYEE, "search_directory", {"employee_name": "王小明"})
+
+    row = result["名單"][0]
+    assert set(row) == {"姓名", "員工編號", "部門", "角色", "分機", "email", "到職日"}
+    assert row["角色"] == "部門主管"
+
+
+async def test_directory_only_my_department(pool):
+    result = await chat_tools.execute(
+        pool, EMPLOYEE, "search_directory", {"only_my_department": True}
+    )
+
+    assert result["提問者所屬部門"] == "研發部"
+    assert {row["部門"] for row in result["名單"]} == {"研發部"}
+
+
+async def test_directory_is_not_blocked_by_colleague_name_guard(pool):
+    """查同事的分機本來就是點名同事，不能被 I16 那道擋法攔下。"""
+    result = await chat_tools.execute(
+        pool, EMPLOYEE, "search_directory", {"employee_name": "張大同"}, question="張大同的分機幾號？"
+    )
+
+    assert result["ok"] is True
+    assert result["名單"][0]["姓名"] == "張大同"
 
 
 async def test_today_status_uses_virtual_clock(pool, db):

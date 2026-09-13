@@ -65,21 +65,8 @@ async def ask(pool: asyncpg.Pool, client: GeminiClient, current_user: dict, ques
 
     try:
         results = await policy_retrieval.retrieve(pool, client, question)
-
-        if not results:
-            # 檢索落空改走受限的輕量提示，而不是回一句制式拒答：使用者輸入「早安」、
-            # 抱怨工作、或問了個人薪資這類問題時，語料當然撈不到東西，回「查無相關
-            # 規定」既不像人話也幫不上忙。`FALLBACK_PROMPT` 明確禁止產生任何政策
-            # 內容，所以這條路徑沒有幻覺風險——它只被允許寒暄、同理與引導。
-            text = await client.generate(chat_prompt.FALLBACK_PROMPT, question)
-            answer = Answer(kind="fallback", text=text, refused=True, sources=[])
-            _log(current_user["id"], question, answer, started_at)
-            return _to_dict(answer)
-
-        settings = await _load_settings(pool, current_user["id"])
-        user_content = chat_prompt.build_user_content(results, question, settings)
         text, tool_names = await asyncio.wait_for(
-            answer_with_tools(pool, client, current_user, user_content, question=question),
+            answer_question(pool, client, current_user, question, results),
             timeout=app_settings.CHAT_TOTAL_TIMEOUT_SECONDS,
         )
     except TimeoutError as exc:
@@ -94,30 +81,63 @@ async def ask(pool: asyncpg.Pool, client: GeminiClient, current_user: dict, ques
         logger.warning("chat_upstream_error", user_id=current_user["id"], error=str(exc))
         raise AppError(503, "AI 助理目前無法使用，請稍後再試。", "CHAT_UNAVAILABLE") from exc
 
-    answer = Answer(
-        # 有呼叫工具就是個人資料查詢，沒有就是純政策問答（批 A 的行為完全不變）。
-        kind="personal" if tool_names else "policy",
-        text=text,
-        # 個人資料查詢不套用政策拒答的字串比對：那組 marker 認的是「文件裡沒有」這類
-        # 措辭，對「你這個月沒有遲到」這種正常答案會誤判成拒答。
-        refused=False if tool_names else chat_prompt.is_refusal(text),
-        sources=[] if tool_names else [Source(r.source_file, r.section_path, r.score) for r in results],
-    )
+    if tool_names:
+        # 有呼叫工具就是個人資料查詢。不套用政策拒答的字串比對：那組 marker 認的是
+        # 「文件裡沒有」這類措辭，對「你這個月沒有遲到」這種正常答案會誤判成拒答。
+        answer = Answer(kind="personal", text=text, refused=False, sources=[])
+    elif not results:
+        # 檢索落空又沒有呼叫工具：寒暄、情緒、或文件沒有涵蓋的問題，一律視為拒答。
+        answer = Answer(kind="fallback", text=text, refused=True, sources=[])
+    else:
+        answer = Answer(
+            kind="policy",
+            text=text,
+            refused=chat_prompt.is_refusal(text),
+            sources=[Source(r.source_file, r.section_path, r.score) for r in results],
+        )
     _log(current_user["id"], question, answer, started_at, tool_names)
     return _to_dict(answer)
 
 
+async def answer_question(
+    pool: asyncpg.Pool, client: GeminiClient, current_user: dict, question: str, results: list
+) -> tuple[str, list[str]]:
+    """依檢索結果組提示，帶工具清單回答。檢索落空與否**都帶工具**。
+
+    09-13 以前檢索落空時直接走不帶工具的 `FALLBACK_PROMPT`，於是個人資料題能不能查，
+    取決於問法碰巧像不像某份規章（「異常」查得到、「異動」查不到，見 PITFALLS I17）。
+    現在兩條路徑只差在系統提示的底（有文件依據用 SYSTEM_PROMPT、沒有用受限的
+    FALLBACK_PROMPT），工具清單一律相同。
+
+    **刻意是公開函式**：`backend/eval/run_eval.py` 必須呼叫這支，檢索落空的題目也要走
+    同一條路徑，否則 eval 看不到落空路徑的行為——那正是 I17 當初沒被抓到的原因之一。
+    """
+    if results:
+        settings = await _load_settings(pool, current_user["id"])
+        user_content = chat_prompt.build_user_content(results, question, settings)
+    else:
+        # 沒有文件片段也沒有推算需求，不必讀考勤設定；原樣送出問題即可。
+        user_content = question
+    return await answer_with_tools(
+        pool, client, current_user, user_content, question=question, has_context=bool(results)
+    )
+
+
 async def answer_with_tools(
-    pool: asyncpg.Pool, client: GeminiClient, current_user: dict, user_content: str, *, question: str
+    pool: asyncpg.Pool,
+    client: GeminiClient,
+    current_user: dict,
+    user_content: str,
+    *,
+    question: str,
+    has_context: bool = True,
 ) -> tuple[str, list[str]]:
     """帶工具清單問一次；模型要求呼叫工具就執行後再問一次，取得最終文字。
 
     模型沒有呼叫任何工具時這裡只有一次呼叫，延遲與批 A 完全相同——**這是「一律帶工具、
     不做意圖分流」這個決策成立的前提**（design.md Decision 7）。
 
-    **刻意是公開函式**：`backend/eval/run_eval.py` 必須呼叫這支而不是自己組一次
-    `client.generate()`。eval 若走一條「沒掛工具」的捷徑，那 77 題跑再多次也證明不了
-    正式環境帶工具之後有沒有退化——而那正是這一批唯一的硬性驗收條件。
+    `has_context=False` 代表檢索落空，系統提示改以受限的 FALLBACK_PROMPT 為底。
     """
     today = get_business_date(await get_virtual_now(), tz=app_settings.APP_TIMEZONE)
     tools = chat_tools.build_declarations(current_user)
@@ -129,7 +149,9 @@ async def answer_with_tools(
         for tool in tools
         for declaration in tool.function_declarations
     )
-    system_prompt = chat_prompt.build_system_prompt(today, has_team_tools=has_team_tools)
+    system_prompt = chat_prompt.build_system_prompt(
+        today, has_team_tools=has_team_tools, has_context=has_context
+    )
 
     turn = await client.generate_with_tools(system_prompt, user_content, tools)
     if not turn.calls:
@@ -154,7 +176,7 @@ async def answer_with_tools(
     # 整片消失（77 題 eval 實測從 7/7 掉到 1/7），見 chat_prompt.TOOL_RESULT_RULES。
     text = await client.continue_with_tool_results(
         chat_prompt.build_system_prompt(
-            today, has_team_tools=has_team_tools, with_tool_results=True
+            today, has_team_tools=has_team_tools, with_tool_results=True, has_context=has_context
         ),
         tools,
         turn,

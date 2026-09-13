@@ -254,8 +254,14 @@ class GeminiClient:
     ) -> str:
         """把工具執行結果送回模型，取得最終的文字回答。
 
-        `results` 的順序必須與 `turn.calls` 一一對應。刻意不允許在這裡再吐出新的工具
-        呼叫——次數上限由 service 層控制（見 design.md Decision 6）。
+        `results` 的順序必須與 `turn.calls` 一一對應。
+
+        **這一輪以 `function_calling_config.mode = NONE` 禁止模型再呼叫工具。** 工具清單
+        仍然要帶（歷史紀錄裡有 function_call，不宣告工具 API 會拒絕），但不加這個設定時
+        模型偶爾會在第二輪再要一次工具——09-13 實測「我主管的分機?」，模型查完部門
+        名單後又想查一次姓名，`response.text` 當場拋出「Could not convert
+        part.function_call to text」，使用者看到 503。「工具往返只有一輪」
+        （design.md Decision 6）必須由 API 保證，不能靠模型自律。
         """
 
         async def _call() -> str:
@@ -280,13 +286,26 @@ class GeminiClient:
                     ],
                 },
             ]
-            response = await model.generate_content_async(
-                history,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=app_settings.GEMINI_TEMPERATURE
-                ),
-            )
-            return response.text
+            # 禁止呼叫工具之後，lite 模型偶爾仍會回一個沒有任何文字的空回應（09-13 實測
+            # 同一題 3 次出現 1 次，直接重打 4 次全部正常）。只重試一次：這是偶發的上游
+            # 行為，不是提示詞問題，無限重試只會把配額燒掉。
+            finish_reason = None
+            for _ in range(2):
+                response = await model.generate_content_async(
+                    history,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=app_settings.GEMINI_TEMPERATURE
+                    ),
+                    tool_config={"function_calling_config": {"mode": "NONE"}},
+                )
+                # 不用 `response.text`：回應裡只要混了任何非文字的 part 它就拋例外。
+                candidate = response.candidates[0] if response.candidates else None
+                parts = candidate.content.parts if candidate else []
+                text = "".join(part.text for part in parts if part.text)
+                if text:
+                    return text
+                finish_reason = candidate.finish_reason if candidate else None
+            raise GeminiUnavailable(f"第二輪沒有產生任何文字回答（finish_reason={finish_reason}）。")
 
         return await self._with_timeout(_call())
 

@@ -87,8 +87,34 @@ async def test_empty_retrieval_uses_restricted_fallback_prompt(
 
     assert fake_client.generate_calls == 1
     system_instruction, _ = fake_client.generate_calls_args[0]
-    assert system_instruction == chat_prompt.FALLBACK_PROMPT
-    assert system_instruction != chat_prompt.SYSTEM_PROMPT
+    assert system_instruction.startswith(chat_prompt.FALLBACK_PROMPT)
+    assert chat_prompt.SYSTEM_PROMPT not in system_instruction
+
+
+async def test_empty_retrieval_still_offers_tools_for_personal_questions(
+    client, pool, use_fake_chat_client, clean_policy_embeddings
+):
+    """「我8月有哪幾天異動?」這種問法搜不到任何文件，09-13 以前會被分到不帶工具的
+    落空路徑、回「沒有權限查詢」（PITFALLS I17）。檢索落空與否，工具清單都必須一樣。"""
+    fake_client = FakeGeminiClient(
+        tool_calls=[ToolCall(name="get_my_attendance_summary", args={
+            "start_date": "2026-08-01", "end_date": "2026-08-31",
+        })],
+        tool_answer_text="你 8 月 14 日遲到。",
+    )
+    use_fake_chat_client(fake_client)
+    headers = await login_headers(client, "employee@demo.com")
+
+    response = await client.post("/api/chat", headers=headers, json={"question": "我8月有哪幾天異動?"})
+
+    assert response.status_code == 200
+    answer = response.json()["answer"]
+    assert answer["kind"] == "personal"
+    assert answer["refused"] is False
+    assert fake_client.continue_calls == 1
+    name, payload = fake_client.tool_results_seen[0]
+    assert name == "get_my_attendance_summary"
+    assert payload["ok"] is True
 
 
 async def test_answer_prompt_includes_live_attendance_settings(

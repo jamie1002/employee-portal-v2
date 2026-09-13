@@ -438,13 +438,6 @@ questions:
       - "駁回一定會附上理由，可依理由修改申請內容後重新送出一筆新的申請"
       - "已駁回的申請本身不能被重新審核或修改"
 
-  - question: "今天已經有一筆待審核的請假申請了，還可以再申請加班嗎？"
-    category: policy
-    expected_section_path: "請假辦法及福利制度 > 6. 常見情境 Q&A"
-    expected_points:
-      - "不行，當天有任一筆待審核的請假或補打卡申請就不能送出加班申請"
-      - "需等該筆申請審核完成（核准或駁回）後才能申請"
-
   - question: "公司規劃福利制度的原則是什麼？"
     category: policy
     expected_section_path: "請假辦法及福利制度 > 7. 福利制度"
@@ -850,3 +843,93 @@ questions:
     expected_points:
       - "管理員可指定部門查詢，應列出業務部成員的出勤統計"
       - "以部門名稱解析，不需要使用者提供任何編號"
+
+  # ── 個人資料、閒聊、通訊錄（2026-09-13）──────────────────────────────────
+  # 補的是 09-13 使用者實測發現、而原本 87 題全部看不到的四個缺口（PITFALLS I17）：
+  #   1. 問法搜不到文件時，模型拿不到工具 → 回「沒有權限查詢」
+  #   2. 工具只給最近 10 天明細 → 7 月的異常日期列不出來
+  #   3. 團隊工具沒有日期 → 主管問不到同事哪幾天異常
+  #   4. 沒有通訊錄工具，且「部門有哪些人」被誤回沒有權限
+  # 另外刪掉一題與 §4.3 重複的「待審核請假還能不能申請加班」（同一條規則考兩次）。
+  #
+  # 異常日期與通訊錄資料一律在執行時查資料庫算出，不手填——展示資料重置或種子改動後
+  # 手填的答案會悄悄過期。
+
+  - question: "早安"
+    category: chitchat
+    expected_section_path: null
+    expect_tools: []
+    expected_points:
+      - "親切回應，簡短說明可以協助的範圍"
+      - "不得呼叫任何查詢工具，不得回「沒有權限」"
+
+  - question: "這個系統有夠難用，每次打卡都卡住"
+    category: chitchat
+    expected_section_path: null
+    expect_tools: []
+    expected_points:
+      - "先表達理解與關心，不說教"
+      - "不得呼叫任何查詢工具，不得回「沒有權限」"
+
+  - question: "我8月有哪幾天異常?列出日期"
+    category: personal
+    # 使用者 09-13 實測的原句：多了「列出日期」四個字就搜不到文件，被分到不帶工具的路徑。
+    as_role: employee
+    expected_section_path: null
+    expect_tools: [get_my_attendance_summary]
+    expected_dates: {start: "2026-08-01", end: "2026-08-31"}
+    expected_points:
+      - "實際查詢並逐日列出 8 月遲到、早退、缺勤、未打下班卡的日期"
+      - "不得回「沒有權限」或叫使用者自己去系統查"
+
+  - question: "我8月有哪幾天異動?"
+    category: personal
+    # 使用者 09-13 實測的原句。「異動」在系統裡指「當天有申請單」，問的可能是出勤異常，
+    # 也可能是申請紀錄，兩支工具都算合理；重點是**有去查**，不是回「沒有權限」。
+    as_role: employee
+    expected_section_path: null
+    expect_tools: [get_my_attendance_summary, get_my_requests]
+    expected_points:
+      - "實際查詢個人資料後回答"
+      - "不得回「沒有權限」"
+
+  - question: "我7月有哪幾天異常?"
+    category: personal
+    # 使用者 09-13 實測：8 月列得出日期、7 月列不出來。舊版明細只取最近 10 天，
+    # 7 月的異常都不在月底那 10 天裡。
+    as_role: employee
+    expected_section_path: null
+    expect_tools: [get_my_attendance_summary]
+    expected_dates: {start: "2026-07-01", end: "2026-07-31"}
+    expected_points:
+      - "逐日列出 7 月的異常日期，不能只給次數"
+
+  - question: "陳小華8月的異常是哪幾天?"
+    category: personal
+    as_role: manager
+    expected_section_path: null
+    expect_tools: [get_team_attendance_summary]
+    expected_dates: {employee_name: "陳小華", start: "2026-08-01", end: "2026-08-31"}
+    expected_points:
+      - "主管查所屬部門同事，應逐日列出異常日期"
+
+  - question: "我主管的分機是多少？"
+    category: personal
+    as_role: employee
+    expected_section_path: null
+    expect_tools: [search_directory]
+    expected_mentions: {extension_of: "王小明"}
+    expected_points:
+      - "查通訊錄後答出研發部主管王小明的分機"
+      - "通訊錄全公司都查得到，不得回沒有權限"
+
+  - question: "我的部門有哪些人？"
+    category: personal
+    # 09-13 使用者實測被回「沒有權限查看」——通訊錄是全公司公開的（SPEC 權限矩陣）。
+    as_role: employee
+    expected_section_path: null
+    expect_tools: [search_directory]
+    expected_mentions: {members_of_my_department: true}
+    expected_points:
+      - "列出研發部所有成員"
+      - "不得回「沒有權限」"
