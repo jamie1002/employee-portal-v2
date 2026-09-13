@@ -56,6 +56,57 @@ MUST 經由 `attendance_scope.resolve_visible_user_ids()` 解析可見成員。
 - **WHEN** 後端組裝 `get_team_attendance_summary` 的宣告
 - **THEN** 該宣告的參數不含 `department_name`
 
+### Requirement: 個人資料查詢不因問法搜不到政策文件而失效
+
+檢索落空時，系統 SHALL 仍提供與檢索命中時相同的工具清單，僅將系統提示的底改為受限的
+fallback 提示。MUST NOT 以檢索結果決定是否提供工具。
+
+#### Scenario: 措辭與政策文件不相似的個人資料題
+
+- **GIVEN** 以 `employee` 身分登入
+- **WHEN** 提問「我8月有哪幾天異動?」且檢索結果為空
+- **THEN** 模型可呼叫個人出勤工具並回答，回應的 `kind` 為 `personal`，MUST NOT 回答「沒有權限」
+
+#### Scenario: 閒聊不觸發工具
+
+- **GIVEN** 以任一角色登入
+- **WHEN** 提問「早安」
+- **THEN** 回應的 `kind` 為 `fallback`，不呼叫任何工具
+
+### Requirement: 出勤工具回傳完整的異常日期
+
+個人與團隊出勤工具 SHALL 依遲到、早退、缺勤、未打下班卡分類回傳區間內的全部異常日期，
+MUST NOT 只回傳部分明細。打卡時間 SHALL 以台北時間回傳。
+
+#### Scenario: 異常位於區間前段
+
+- **GIVEN** 員工 7 月的異常都在月初
+- **WHEN** 提問「我7月有哪幾天異常?」
+- **THEN** 回答逐日列出與出勤頁篩選結果一致的全部異常日期
+
+#### Scenario: 主管查詢部門同事的異常日期
+
+- **GIVEN** 以 `manager` 身分登入
+- **WHEN** 提問「陳小華8月的異常是哪幾天?」
+- **THEN** 經 `get_team_attendance_summary` 回答陳小華 8 月的全部異常日期
+
+### Requirement: 通訊錄查詢範圍與欄位比照前端員工資訊頁
+
+`search_directory` SHALL 對所有角色開放全公司通訊錄，回傳欄位 MUST 與「員工資訊」頁顯示的
+一致（姓名、員工編號、部門、角色、分機、email、到職日）。
+
+#### Scenario: 員工查詢主管分機
+
+- **GIVEN** 以 `employee` 身分登入
+- **WHEN** 提問「我主管的分機是多少？」
+- **THEN** 回答所屬部門主管的分機號碼
+
+#### Scenario: 員工查詢部門成員不視為越權
+
+- **GIVEN** 以 `employee` 身分登入
+- **WHEN** 提問「我的部門有哪些人？」
+- **THEN** 列出所屬部門成員，MUST NOT 回答「沒有權限查看」
+
 ### Requirement: 查詢對象以姓名指定，不以編號指定
 
 工具參數 MUST NOT 包含 `user_id` 或 `department_id`。要指定查詢對象時 SHALL 使用
@@ -168,7 +219,8 @@ MUST NOT 記錄工具參數、工具回傳內容、提問全文或回答全文�
 
 帶工具清單後，政策類提問 SHALL 維持單輪呼叫。`npm run eval:chat` 的全部門檻
 （hit@3 ≥ 90%、章節覆蓋率 100%、引用率 100%、誘導題拒答率 100%、該答有答 100%、
-數字型答案 100%、推算但書 ≥ 85%、權限不足時正確說明 100%、越權未洩漏 100%）MUST 全數達標。
+數字型答案 100%、推算但書 ≥ 85%、權限不足時正確說明 100%、越權未洩漏 100%、工具使用正確 100%、
+異常日期完整 100%、通訊錄答案正確 100%）MUST 全數達標。
 
 #### Scenario: 政策提問不觸發工具
 
