@@ -259,7 +259,8 @@ async def test_reversed_date_range_returns_structured_error(pool, db):
 
 async def test_declarations_contain_no_id_parameters(pool, db):
     """工具參數不得出現 user_id／department_id：模型不知道 id 是什麼，只會猜一個整數，
-    猜中別人又剛好同部門時權限檢查照樣放行（design.md Decision 3）。"""
+    猜中別人又剛好同部門時權限檢查照樣放行（openspec/changes/add-personal-data-chat/design.md
+    Decision 3）。"""
     for role_user in (EMPLOYEE, MANAGER):
         for tool in chat_tools.build_declarations(role_user):
             for declaration in tool.function_declarations:

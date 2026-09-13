@@ -75,9 +75,9 @@ async def test_invalid_permission_key_is_rejected(client):
 
 
 async def test_permission_takes_effect_and_is_revoked_immediately_on_same_token(client):
-    """釘住「權限不在 JWT 裡」：同一個舊 token，授權後立即可用、收回後立即被擋
-    （見 docs/PITFALLS.md C3）。用 GET /auth/me 的即時重查間接驗證，
-    因為批 1 還沒有其他掛 require_permission 的業務端點。"""
+    """釘住「權限不在 JWT 裡」：同一個舊 token，授權與收回後 GET /auth/me 立即反映
+    （見 docs/PITFALLS.md C3）。這支寫於批 1，當時還沒有掛 require_permission 的業務端點；
+    「收回後業務端點立即擋下」由下一支測試直接驗證。"""
     admin_token = await _admin_token(client)
     employee_token = await _login(client, "chang@demo.com")
 
@@ -99,6 +99,22 @@ async def test_permission_takes_effect_and_is_revoked_immediately_on_same_token(
 
     after_revoke = await client.get("/api/auth/me", headers=_auth(employee_token))
     assert after_revoke.json()["user"]["permissions"] == []
+
+
+async def test_revoked_permission_blocks_business_endpoint_on_same_token(client):
+    """同一個 token 在收回權限後，打掛了 require_permission 的業務端點立即得到 403——
+    不必重新登入，也不必等 token 過期。這才是「收回即時生效」真正要保證的事。"""
+    admin_token = await _admin_token(client)
+    employee_token = await _login(client, "chang@demo.com")
+    holiday = {"holiday_date": "2026-12-25", "name": "聖誕節（示範）"}
+
+    await client.put("/api/users/5/permissions", json={"permissions": ["holidays.manage"]}, headers=_auth(admin_token))
+    granted = await client.post("/api/holidays", json=holiday, headers=_auth(employee_token))
+    assert granted.status_code == 201
+
+    await client.put("/api/users/5/permissions", json={"permissions": []}, headers=_auth(admin_token))
+    revoked = await client.delete("/api/holidays/2026-12-25", headers=_auth(employee_token))
+    assert revoked.status_code == 403
 
 
 async def test_partial_update_preserves_granted_by_and_granted_at(client):

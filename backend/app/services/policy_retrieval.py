@@ -1,8 +1,8 @@
 """檢索服務：把使用者的查詢轉成向量，對 `policy_embeddings` 檢索最相似的 chunk，
 並套用 `RETRIEVAL_MIN_SCORE` 門檻過濾。
 
-過濾後為空時回傳空 list：要不要回覆「文件中查無相關規定」是上層（`services/chat.py`）
-的措辭決定，這裡只負責「有沒有足夠相關的依據」這件事。
+過濾後為空時回傳空 list。空結果怎麼回答是上層（`services/chat.py`）的決定——目前是
+改以受限的提示為底、工具清單照樣提供——這裡只負責「有沒有足夠相關的依據」這件事。
 """
 
 from __future__ import annotations

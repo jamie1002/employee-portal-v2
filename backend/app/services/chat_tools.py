@@ -37,8 +37,9 @@ from app.utils.virtual_clock import get_virtual_now
 
 _T = genai.protos.Type
 
-# 回給模型的明細筆數上限。聚合過的統計才是答案，明細只是讓回答能舉例；
-# 全部回去會讓第二輪的輸入暴增，延遲與配額都吃不消（design.md Decision 4）。
+# 聚合過的統計才是答案，明細全部回去會讓第二輪的輸入暴增，延遲與配額都吃不消
+# （design.md Decision 4）。兩個用途：出勤查詢區間在這個天數以內才列出每一天的明細；
+# 申請單清單最多回這個數字的兩倍。
 _MAX_DETAIL_ROWS = 10
 
 # 區間超過 `_MAX_DETAIL_ROWS` 天時，明細只列異常的日子，最多這麼多筆（一個月的上限）。
@@ -82,7 +83,8 @@ def _declaration(name: str, description: str, properties: dict | None = None,
     )
 
 
-def _personal_declarations() -> list[genai.protos.FunctionDeclaration]:
+def _declarations_for_everyone() -> list[genai.protos.FunctionDeclaration]:
+    """所有角色都拿得到的五支工具：四支只查提問者本人，加上全公司公開的通訊錄。"""
     return [
         _declaration(
             "get_today_status",
@@ -186,7 +188,7 @@ def build_declarations(current_user: dict) -> list[genai.protos.Tool]:
     這層過濾是 UX——讓模型不必去呼叫一支注定失敗的工具、白白多一輪往返。
     真正的安全邊界在 `execute()`。
     """
-    declarations = _personal_declarations()
+    declarations = _declarations_for_everyone()
     if current_user["role"] in ("manager", "admin"):
         declarations += _team_declarations(current_user["role"])
     return [genai.protos.Tool(function_declarations=declarations)]

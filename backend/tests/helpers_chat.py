@@ -50,8 +50,8 @@ class FakeGeminiClient:
         self.embed_query_calls = 0
         self.embed_documents_calls = 0
         self.generate_calls = 0
-        # 記錄每次 generate 收到的 (system_instruction, user_content)，讓測試能斷言
-        # 落空路徑走的是受限的 FALLBACK_PROMPT 而不是政策問答的 SYSTEM_PROMPT——
+        # 記錄每次第一輪生成收到的 (system_instruction, user_content)，讓測試能斷言
+        # 落空路徑的提示底是受限的 FALLBACK_PROMPT 而不是政策問答的 SYSTEM_PROMPT——
         # 用錯 prompt 等於讓模型在沒有檢索依據的情況下談政策，是幻覺風險的來源。
         self.generate_calls_args: list[tuple[str, str]] = []
 
@@ -65,15 +65,8 @@ class FakeGeminiClient:
             return self.document_vectors[: len(texts)]
         return [make_unit_vector([1.0]) for _ in texts]
 
-    async def generate(self, system_instruction: str, user_content: str, tools=None) -> str:
-        self.generate_calls += 1
-        self.generate_calls_args.append((system_instruction, user_content))
-        if self.generate_error is not None:
-            raise self.generate_error
-        return self.generate_text
-
     async def generate_with_tools(self, system_instruction: str, user_content: str, tools) -> ToolTurn:
-        """預設不呼叫任何工具（等同批 A 的單輪行為）。要模擬工具呼叫時，
+        """預設不呼叫任何工具（單輪直接回文字）。要模擬工具呼叫時，
         把 `tool_calls` 設成 `[ToolCall(name=..., args=...)]`。"""
         self.generate_calls += 1
         self.generate_calls_args.append((system_instruction, user_content))

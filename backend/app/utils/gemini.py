@@ -5,9 +5,8 @@
 未通過 Gate 1（`Requires-Dist: pydantic<3.0.0,>=2.12.5`，會把 v2 鎖定的
 `pydantic==2.10.4` 往上推），實際採用官方已停止維護但版本相容的
 `google-generativeai==0.8.6`。import 這個套件時會印出一句 `FutureWarning`，
-是套件本身的棄用警告，不是本專案的程式錯誤（見 `docs/PITFALLS.md`）。批 B 或未來
-升級，必須等 `google-genai` 放寬 `pydantic` 下限、或 v2 的鎖定版本本身升級之後
-再重跑探針。
+是套件本身的棄用警告，不是本專案的程式錯誤（見 `docs/PITFALLS.md` I1）。未來要升級，
+必須等 `google-genai` 放寬 `pydantic` 下限、或 v2 的鎖定版本本身升級之後再重跑探針。
 
 **兩個容易搞混的「不對稱」**：
 1. **正規化必須兩側一致**——這裡 document 與 query 兩側都做 L2 正規化。Gemini
@@ -39,7 +38,8 @@ _last_call_at: dict[str, float] = {}
 @dataclass
 class ToolCall:
     """模型要求呼叫的工具。`name` 未經驗證——模型有可能喊出一個不存在、或它這個角色
-    不該擁有的工具名稱，驗證是 service 層的責任（見 design.md Decision 2）。"""
+    不該擁有的工具名稱，驗證是 service 層的責任（見
+    `openspec/changes/add-personal-data-chat/design.md` Decision 2）。"""
 
     name: str
     args: dict
@@ -107,7 +107,7 @@ async def _throttle(key: str) -> None:
     **`key` 依呼叫類型（`"embedding"` / `"generate"`）各自獨立計時**：embedding 與
     生成呼叫的是 Gemini 不同的模型端點，各自有獨立的配額桶，共用同一個全域計時器
     會讓單次問答內部「先 embed 再 generate」這兩次呼叫互相排隊——使用者會被迫多等
-    一個節流間隔，卻誤以為是模型在思考（見 `docs/PITFALLS.md`）。
+    一個節流間隔，卻誤以為是模型在思考（見 `docs/PITFALLS.md` I6）。
 
     等待動作刻意放在鎖外執行，鎖只保護「查詢並登記下一個時間槽」這個極短的臨界區，
     避免某一種呼叫的等待時間把其他呼叫（含不同 key、或並行的其他使用者請求）一併
@@ -126,12 +126,13 @@ async def _throttle(key: str) -> None:
 
 
 class GeminiClient:
-    """單次請求可重用的 Gemini client。`generate()` 的 `tools` 參數是為批 B 的
-    function calling 預留的位子，批 A 恆傳 `None`。
+    """單次請求可重用的 Gemini client。生成一律走 `generate_with_tools()` 與
+    `continue_with_tool_results()`：政策問答與個人資料查詢是同一條帶工具的路徑
+    （模型沒呼叫工具時就只有第一次呼叫）。
 
     **`throttled` 預設 True，但互動式問答（`/api/chat`）刻意傳 False**：節流是
     為了保護免費層配額，代價是每次呼叫之間強制等待 `60 / RPM` 秒。這個代價對
-    「連續跑 72 題的 eval」或「一次灌 61 個 chunk 的 ingest」是划算的（慢一點
+    「連續跑整份題庫的 eval」或「一次灌 61 個 chunk 的 ingest」是划算的（慢一點
     無所謂），但對真人互動式問答是純粹的體驗傷害——使用者每問一題就被迫多等
     數秒，卻不知道系統在等什麼。互動路徑的配額保護改由
     `CHAT_RATE_LIMIT_PER_MINUTE`（每使用者每分鐘上限，超過直接回 429）負責：
@@ -193,31 +194,6 @@ class GeminiClient:
         _check_dimension(vector)
         return vector
 
-    async def generate(self, system_instruction: str, user_content: str, tools: Any = None) -> str:
-        """呼叫生成模型。
-
-        `temperature` 走 `GEMINI_TEMPERATURE` 設定值。**這個值與「回答語氣溫暖與否」
-        沒有直接關係**（那是系統提示措辭決定的），它影響的是用詞的隨機性；調高有機會
-        讓措辭略微自然，但也會讓輸出更不穩定——規則 2（數字必須有依據）這類需要精確
-        遵守的約束，temperature 越高越容易被模型「順口」帶過。任何調整都必須重跑
-        `npm run eval:chat` 確認六項門檻仍然全綠，不能只憑讀起來的感覺。"""
-
-        async def _call() -> str:
-            await self._maybe_throttle("generate")
-            model = genai.GenerativeModel(
-                model_name=app_settings.GEMINI_MODEL,
-                system_instruction=system_instruction,
-            )
-            response = await model.generate_content_async(
-                user_content,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=app_settings.GEMINI_TEMPERATURE
-                ),
-            )
-            return response.text
-
-        return await self._with_timeout(_call())
-
     async def generate_with_tools(
         self, system_instruction: str, user_content: str, tools: list[Any]
     ) -> ToolTurn:
@@ -226,6 +202,12 @@ class GeminiClient:
         **這一層刻意不決定要不要執行工具，也不執行它們**——工具的權限判斷與派工屬於
         service 層（`services/chat_tools.py`）。SDK 封裝若順手把工具執行掉，授權敏感的
         控制流就藏進了這支通用工具函式裡，之後沒有人會想到要來這裡檢查權限。
+
+        `temperature` 走 `GEMINI_TEMPERATURE` 設定值。**這個值與「回答語氣溫暖與否」
+        沒有直接關係**（那是系統提示措辭決定的），它影響的是用詞的隨機性；調高有機會
+        讓措辭略微自然，但也會讓輸出更不穩定——規則 2（數字必須有依據）這類需要精確
+        遵守的約束，temperature 越高越容易被模型「順口」帶過。任何調整都必須重跑
+        `npm run eval:chat` 確認全部門檻仍然達標，不能只憑讀起來的感覺。
         """
 
         async def _call() -> ToolTurn:
@@ -261,7 +243,8 @@ class GeminiClient:
         模型偶爾會在第二輪再要一次工具——09-13 實測「我主管的分機?」，模型查完部門
         名單後又想查一次姓名，`response.text` 當場拋出「Could not convert
         part.function_call to text」，使用者看到 503。「工具往返只有一輪」
-        （design.md Decision 6）必須由 API 保證，不能靠模型自律。
+        （`openspec/changes/add-personal-data-chat/design.md` Decision 6）必須由 API 保證，
+        不能靠模型自律。
         """
 
         async def _call() -> str:

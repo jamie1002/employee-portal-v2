@@ -1,8 +1,13 @@
-"""問答服務：限流 → 檢索 → 空則短路 → 生成 → 組回應。上游例外一律轉 `AppError(503)`。
+"""問答服務：限流 → 檢索 → 帶工具生成（必要時執行工具再生成一次）→ 組回應。
+上游例外一律轉 `AppError(503)`。
 
-`ask()` 收整包 `current_user` 而不是只收 `user_id`——批 B 的個人查詢需要 `role` 與
+檢索落空時**不短路**：改以受限的 `FALLBACK_PROMPT` 為提示底，工具清單照樣提供
+（見 `docs/PITFALLS.md` I17）。
+
+`ask()` 收整包 `current_user` 而不是只收 `user_id`——個人資料查詢需要 `role` 與
 `department_id` 做 deny-by-default 範圍限縮（見
 `openspec/changes/add-policy-chat/design.md`「為批 B 鋪路」）。
+本檔提到的 Decision 編號，除非另外註明，都指 `openspec/changes/add-personal-data-chat/design.md`。
 """
 
 from __future__ import annotations
@@ -34,9 +39,10 @@ class Source:
 
 @dataclass
 class Answer:
-    """`kind` 目前有兩種：`"policy"`（依檢索片段回答）與 `"fallback"`（檢索落空，
-    走受限的寒暄／同理／引導路徑）。批 B 的個人資料查詢會再擴充這個分流欄位
-    （見 design.md「為批 B 鋪路」）。"""
+    """`kind` 有三種（`SPEC.md` §6.8）：
+    - `"policy"`：依檢索片段回答，沒有呼叫工具
+    - `"personal"`：有呼叫查詢工具（不論檢索有沒有命中）
+    - `"fallback"`：檢索落空且沒有呼叫工具，走受限的寒暄／同理／引導路徑"""
 
     kind: str
     text: str
@@ -157,8 +163,9 @@ async def answer_with_tools(
     if not turn.calls:
         return turn.text, []
 
-    # **結構上就只有一輪**：拿到結果後直接要文字回答，不再給模型第二次呼叫工具的機會。
-    # 本批次的工具都是單步可答的，需要的資訊 current_user 裡都有。沒有這個上界時，
+    # **結構上就只有一輪**：拿到結果後直接要文字回答，不再給模型第二次呼叫工具的機會
+    # （`continue_with_tool_results()` 以 function_calling mode=NONE 在 API 層強制）。
+    # 這些工具都是單步可答的，需要的資訊 current_user 裡都有。沒有這個上界時，
     # lite 模型偶爾會重複呼叫同一支工具，變成配額絞肉機而且使用者一直等不到答案。
     #
     # 同一輪內模型可以要求呼叫多支工具，但最多就是每支工具各一次——再多必然是重複，
@@ -173,7 +180,7 @@ async def answer_with_tools(
         for call in calls
     ]
     # 第二輪才附加「工具數字不加但書」那段規則。放在第一輪會讓政策問答的推算但書
-    # 整片消失（77 題 eval 實測從 7/7 掉到 1/7），見 chat_prompt.TOOL_RESULT_RULES。
+    # 整片消失（當時 77 題的 eval 實測從 7/7 掉到 1/7），見 chat_prompt.TOOL_RESULT_RULES。
     text = await client.continue_with_tool_results(
         chat_prompt.build_system_prompt(
             today, has_team_tools=has_team_tools, with_tool_results=True, has_context=has_context
@@ -202,7 +209,7 @@ def _log(
     user_id: int, question: str, answer: Answer, started_at: float, tool_names: list[str] | None = None
 ) -> None:
     """不把提問全文寫進 log——只記 user_id、問題長度、命中數、是否拒答、耗時
-    （見 design.md 風險 15：log 隱私）。
+    （見 `openspec/changes/add-policy-chat/design.md`「風險與緩解」的 log 隱私）。
 
     批 B 只多記**工具名稱**。工具的參數含同事姓名、回傳含出勤明細，兩者一律不進 log：
     這是一個公開展示站，任何訪客都能登入操作，把個人出勤散佈到日誌系統風險太高。

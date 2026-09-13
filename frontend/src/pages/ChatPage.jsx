@@ -109,7 +109,7 @@ export default function ChatPage() {
       <div>
         <h2 className="text-xl font-medium text-text-primary">AI 助理</h2>
         <p className="mt-1 text-xs text-text-muted">
-          可以問公司政策，也可以問你自己的出勤、假別與申請進度。查得到的範圍與你在系統裡看得到的一樣。
+          可以問公司政策、你自己的出勤、假別與申請進度，也可以查同事的分機與 email。查得到的範圍與你在系統裡看得到的一樣。
         </p>
       </div>
 

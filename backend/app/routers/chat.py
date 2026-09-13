@@ -1,4 +1,5 @@
-"""AI 政策問答端點（批 A）。router 不做業務判斷，只掛權限 dependency 與呼叫 service。"""
+"""AI 助理端點（政策問答與個人資料查詢共用）。router 不做業務判斷，只掛權限 dependency
+與呼叫 service。"""
 
 from fastapi import APIRouter, Depends, Request
 

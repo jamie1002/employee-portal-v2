@@ -22,8 +22,9 @@ from datetime import date
 # 直接寫了「本文件不包含庫存資料⋯⋯」、§5 要求被問到排除項目時回答「不在本文件
 # 範圍」）。只認一個字串會把這種正確行為誤判成失敗。
 #
-# 注意：落空路徑（`FALLBACK_PROMPT`）不靠字串比對判斷拒答——那條路徑本來就沒有
-# 檢索依據，`chat.py` 直接標記 `refused=True`，不需要猜。
+# 注意：只有「有檢索片段、沒呼叫工具」的政策回答才用這組字串判斷拒答。檢索落空又沒
+# 呼叫工具的回答，`chat.py` 直接標記 `refused=True`；有呼叫工具的一律 `refused=False`
+# （「你這個月沒有遲到」這種正常答案會被這組 marker 誤判）。
 _REFUSAL_MARKERS = (
     "查無相關規定",
     "沒有相關規定",
@@ -135,7 +136,7 @@ FALLBACK_PROMPT = """你是「暖丘生活股份有限公司」員工系統的 A
 回應要簡短，兩三句話就好，不要長篇大論。"""
 
 # 批 B：工具使用規則。**刻意獨立成一個常數，與 SYSTEM_PROMPT 串接而不是改寫它**
-# ——SYSTEM_PROMPT 那串字已經被 77 題 eval 驗證過，每改一個字都要重跑一次才知道
+# ——SYSTEM_PROMPT 那串字已經被整份 eval 題庫驗證過，每改一個字都要重跑一次才知道
 # 有沒有退化。新增的規則放在後面，出問題時可以單獨拿掉這一段做對照。
 TOOL_RULES = """
 
@@ -195,7 +196,7 @@ _TEAM_TOOL_RULES = """
 # 第二條（「問的是規定本身就照文件答」）是 09-13 補的。只有第一條時，員工問「部門主管
 # 看得到其他部門同仁的申請紀錄嗎？」被回成「這部分你目前沒有權限查看」，後面還接了一句
 # 錯誤的規定——lite 模型只抓到「別人的紀錄 → 沒有權限」這個關聯，分不出「幫我查資料」
-# 與「問誰能查」。前一天（加這段規則之前）同一題是正確回答。用一組對照例子把兩者並排，
+# 與「問誰能查」。09-12（加這段規則之前）同一題是正確回答（PITFALLS I15）。用一組對照例子把兩者並排，
 # 比再加一句抽象的限定詞可靠。
 _NO_TEAM_TOOL_RULES = """
 - **使用者要你實際查出「別人的」或「整個部門／全公司的」出勤資料時**（例如「張大同這個月
@@ -231,8 +232,9 @@ _TODAY_PROMPT = """
 今天是 {today}（{weekday}）。使用者提到「今天」「這個月」「上個月」「這週」時，
 一律以這個日期為基準推算，不要用你自己認知的日期。"""
 
-# **刻意放在整份提示詞的最後一行。** 昨天的退化教訓是「位置比措辭大聲」：夾在中間的
-# 規則會被後面的內容蓋過。規則 2 的推算但書是 eval 六項門檻之一，加上規則 7 與日期
+# **刻意放在第一輪提示詞的最後一行**（第二輪只在它後面再接 TOOL_RESULT_RULES）。
+# PITFALLS I13 的教訓是「位置比措辭大聲」：夾在中間的規則會被後面的內容蓋過。
+# 規則 2 的推算但書是 eval 的門檻之一，加上規則 7 與日期
 # 說明之後，它離結尾又遠了一截，實測「下午 14:00 請假到 18:00」這種前提明確的推算題
 # 連續三輪都漏掉但書。把它放在最後一句，是用同一個機制把它搶回來。
 _DISCLAIMER_REMINDER = """
@@ -301,7 +303,8 @@ def format_context(results: list) -> str:
 
 
 def build_user_content(results: list, question: str, settings: dict | None = None) -> str:
-    """組出送進 `generate()` 的使用者訊息（human prompt）。"""
+    """組出第一輪 `generate_with_tools()` 的使用者訊息（human prompt）。只用在有檢索片段時；
+    檢索落空時 `chat.answer_question()` 直接送出原始問題。"""
     return _HUMAN_PROMPT.format(
         settings=format_settings(settings),
         context=format_context(results),
@@ -326,7 +329,10 @@ def build_system_prompt(
     with_tool_results: bool = False,
     has_context: bool = True,
 ) -> str:
-    """組出批 B 的系統提示：既有規則 + 工具規則 + 今天是哪一天。
+    """組出系統提示：提示底 + 工具規則 + 團隊規則（二選一）+ 今天是哪一天。
+
+    `has_context=False` 代表檢索落空：提示底改為受限的 `FALLBACK_PROMPT`，工具規則改用
+    `_FALLBACK_TOOL_RULES`（不能叫模型「依文件片段回答」），也不附推算但書的提醒。
 
     `today` 必須來自虛擬時鐘。傳 `None` 時退回批 A 的提示（不帶工具規則）——
     拿不到日期卻仍然叫模型使用工具，它只會用自己認知的年份去推算區間，

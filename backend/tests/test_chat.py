@@ -247,7 +247,7 @@ async def test_policy_question_stays_single_round(client, pool, use_fake_chat_cl
     """模型不呼叫工具時只有一次生成呼叫，kind 仍是 policy。
 
     這是「一律帶工具、不做意圖分流」這個決策成立的前提：政策問答的延遲不能因為
-    掛上工具清單就變成兩倍（見 design.md Decision 7）。
+    掛上工具清單就變成兩倍（見 openspec/changes/add-personal-data-chat/design.md Decision 7）。
     """
     query_vector = make_unit_vector([1.0])
     await _seed_one_matching_chunk(pool, query_vector)
