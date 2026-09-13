@@ -254,6 +254,8 @@ class QuestionResult:
 
     answer_permission_denied: bool | None = None
 
+    category: str = "policy"
+
     expect_tools: list[str] | None = None
     """這題應該呼叫哪些工具（呼叫其中任一支即算對）。空清單代表**不得**呼叫任何工具
     （閒聊、情緒）。`None` 代表不檢查。
@@ -424,6 +426,7 @@ async def run_eval(
             forbid_leak=bool(item.get("forbid_leak", False)),
             expect_permission_denied=bool(item.get("expect_permission_denied", False)),
             expect_tools=item.get("expect_tools"),
+            category=item.get("category", "policy"),
         )
         if item.get("expected_dates"):
             result.expected_dates = await _compute_expected_dates(
@@ -687,10 +690,16 @@ def _report(
         # 說明（「你沒有權限查看」不是政策內容，沒有東西可引用；09-13 第二輪同一題有時附、
         # 有時不附，照舊計入只會讓這一項隨機紅）。權限句型若出現在該答的題目上，
         # 「該答有答」那一項會抓到，不會因為這裡排除而漏掉。
+        #
+        # 閒聊題也排除：「這個系統有夠難用，每次打卡都卡住」會因為「打卡」命中出勤規則而走
+        # 政策路徑，但正確的回應是同理與引導，本來就沒有引用任何規定（09-13 第三輪）。
         citable = [
             r
             for r in answered
-            if not r.answer_refused and not r.answer_tools and not r.answer_permission_denied
+            if not r.answer_refused
+            and not r.answer_tools
+            and not r.answer_permission_denied
+            and r.category != "chitchat"
         ]
         cited = sum(1 for r in citable if r.answer_has_citation)
         citation_rate = cited / len(citable) if citable else 1.0
