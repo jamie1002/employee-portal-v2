@@ -9,6 +9,7 @@
 | [`SPEC.md`](SPEC.md) | 系統規格：權限矩陣、資料表、API 契約、業務規則、錯誤碼 |
 | [`docs/UI-SPEC.md`](docs/UI-SPEC.md) | 介面規格：版面、使用情境、元件契約、design token、響應式斷點 |
 | [`docs/PITFALLS.md`](docs/PITFALLS.md) | 踩坑紀錄，實作前必讀 |
+| [`docs/PROMPT-ENGINEERING.md`](docs/PROMPT-ENGINEERING.md) | AI 助理的提示工程筆記：規範 LLM 的手法、失敗過的寫法、修改流程 |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | 重建的執行腳本與進度追蹤 |
 | [`docs/REBUILD-TASKS.md`](docs/REBUILD-TASKS.md) | 重建批次的範圍與驗收條件 |
 | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | 使用者手冊（登入頁會直接渲染它） |
@@ -30,7 +31,7 @@
 | 細粒度權限 | admin 可將國定假日／考勤設定／匯出報表個別下放給特定員工 |
 | 匯出報表 | 五種資料類型、欄位勾選、`.xlsx`，範圍 deny-by-default |
 | 展示機制 | 可調虛擬時鐘、展示資料一鍵重置與閒置自動重置 |
-| AI 助理 | 依公司政策文件（考勤規則、請假辦法、產品目錄、公司簡介）回答問題，RAG 架構、附引用來源，唯讀不碰個人資料 |
+| AI 助理 | 唯讀。依公司政策文件回答規定問題（RAG）；以 function calling 查詢個人出勤／假別／申請進度、主管與管理員的團隊出勤、全公司通訊錄，**查得到的範圍等於該角色在前端看得到的範圍** |
 
 ---
 
@@ -122,7 +123,7 @@ npm run db:ingest      # AI 助理語料 embedding（唯一會呼叫 Gemini API 
 npm run test:backend   # pytest
 npm run test:frontend  # Vitest
 npm run test:e2e       # Playwright
-npm run eval:chat      # AI 助理黃金題庫評估（72 題，需 GOOGLE_API_KEY，不進 CI）
+npm run eval:chat      # AI 助理黃金題庫評估（94 題，需 GOOGLE_API_KEY，不進 CI；一輪約 8 分鐘）
 npm test               # 後端 + 前端
 ```
 
@@ -203,6 +204,14 @@ npm test               # 後端 + 前端
 
 前端元件測試則**可以**mock API 層——那一層要驗證的是「元件收到某個回應時畫面對不對」，跟 SQL 正確性是兩件事。
 
+### AI 助理不直接查資料庫，只能呼叫與前端相同的 service
+
+AI 助理的個人資料查詢走 function calling：模型只能從一份「工具清單」裡挑要呼叫哪幾支、帶什麼參數，每支工具內部呼叫的是**前端頁面用的同一支 service 函式**，共用同一套範圍限縮。模型從頭到尾碰不到 SQL。
+
+**為什麼不讓模型直接寫 SQL**：一是權限——複製一份唯讀資料庫只能防寫入，防不了員工寫出查詢別人資料的 SQL；要在 SQL 層擋就得把權限規則重寫一份成 RLS，兩份實作遲早不一致。二是正確性——出勤表只存原始打卡，補打卡與請假核准的「生效值」是讀取時用 Python 算出來的，直接查表的答案會跟畫面對不上而且不會報錯。
+
+**提示詞管不住的事一律交給程式**：工具清單依角色組裝，執行層再檢查一次允許清單（防 prompt injection）；題目點名同事時「只查本人」的工具不執行；工具往返只有一輪由 API 強制。完整的提示工程手法與踩坑見 [`docs/PROMPT-ENGINEERING.md`](docs/PROMPT-ENGINEERING.md)。
+
 ---
 
 ## 雲端部署
@@ -234,6 +243,7 @@ npm test               # 後端 + 前端
 - **只改種子資料**：push → Render 自動部署 → 在畫面上點「重置展示資料」即可套用，不需手動下指令
 - **新增 migration**：push 不會自動更新資料庫，必須手動對正式庫執行一次 `DATABASE_URL="..." npm run db:migrate`，且要**先 migrate 再讓新程式碼上線**
 - **修改政策文件語料**（`db/policy_docs/*.md`）：push 不會自動重新 embedding，必須手動對正式庫執行一次 `GOOGLE_API_KEY="..." DATABASE_URL="..." npm run db:ingest`（只對內容有變的段落重算，不是全量重跑），並重新跑一次 `npm run eval:chat` 確認黃金題庫仍然全綠
+- **只改 AI 助理的程式或提示詞**（沒有 migration、沒改語料）：push 即可，不需要任何資料庫步驟；但 push 前必須在本機跑過一次完整的 `npm run eval:chat`（CI 不跑 eval）
 
 ---
 
@@ -255,4 +265,4 @@ CD 不另外寫部署腳本——Vercel 與 Render 都原生支援「接上 GitH
 - 「處理私人事務」的備註只寫入固定文字，不支援自訂內容
 - 展示環境的資料庫為所有訪客共用，會定期自動重置
 - 登入憑證存於 `localStorage`，可被同網域的 JavaScript 讀取。系統本身不使用任何略過安全轉義的渲染方式，但這仍是公開展示環境，請勿輸入真實個人敏感資訊
-- AI 助理**只回答公司政策文件範圍內的問題**，不查詢任何個人出勤／假別／申請資料（該功能規劃中，尚未實作）；語料為虛構示範內容，公司名稱與前端標題不一致（「暖丘生活」vs. Employee Portal），刻意不統一以保留 `content_hash` 與黃金題庫的有效性
+- AI 助理完全唯讀，不能透過對話打卡、送申請或審核；不支援場地借用查詢；對話不保留多輪上下文（每一問獨立）。語料為虛構示範內容，公司名稱與前端標題不一致（「暖丘生活」vs. Employee Portal），刻意不統一以保留 `content_hash` 與黃金題庫的有效性
