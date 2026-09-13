@@ -13,6 +13,7 @@
 | `SPEC.md` | 系統行為的單一事實來源：權限矩陣、資料表、API 契約、業務規則、錯誤碼 |
 | `docs/UI-SPEC.md` | 頁面版面、使用情境、元件契約、design token、響應式斷點規範 |
 | `docs/PITFALLS.md` | **實作前必讀**。前一版踩過的坑，全部是實測才發現、規格上看不出來的 |
+| `docs/PROMPT-ENGINEERING.md` | **改 AI 助理的提示詞或工具前必讀**。本專案規範 LLM 的手法、失敗過的寫法與修改流程 |
 | **`docs/RUNBOOK.md`** | **重建的執行腳本與進度追蹤**。不確定現在做到哪一步時看這份 |
 | `docs/REBUILD-TASKS.md` | 重建批次的範圍與驗收條件（RUNBOOK 的詳細版） |
 | `docs/USER_GUIDE.md` | 使用者手冊，登入頁會直接渲染它 |
